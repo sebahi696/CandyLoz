@@ -48,7 +48,8 @@ window.Reports = (() => {
     const items = [
       ['tb', 'trial_balance'], ['statement', 'statement_of_account'], ['pnl', 'pnl'], ['vat', 'vat_report'], ['sales', 'sales_report'], ['aged', 'aged_payables'], ['journal', 'general_journal'],
     ];
-    main.innerHTML = `<div class="list" style="max-width:560px">${items.map(([k, l]) => `<button class="row" data-r="${k}"><span class="avatar">${A().I.reports}</span><span class="main"><span class="t">${esc(t(l))}</span></span>${A().I.chevron}</button>`).join('')}</div>`;
+    const desc = { tb: ['أرصدة كل الحسابات مدين/دائن مع الافتتاحي والختامي', 'All accounts, debit/credit with opening and closing'], statement: ['حركة مورد أو حساب مع الرصيد الجاري', 'Movements for a supplier or account with running balance'], pnl: ['الإيرادات وتكلفة المبيعات والمصروفات وصافي الربح', 'Revenue, cost of sales, expenses, net profit'], vat: ['ضريبة المخرجات والمدخلات وصافي المستحق', 'Output vs input VAT and net payable'], sales: ['المبيعات حسب الفرع وطريقة الدفع واليوم', 'Sales by branch, payment method and day'], aged: ['المستحق للموردين حسب عمر الدين', 'What is owed to suppliers by age'], journal: ['كل القيود بتفاصيل الأطراف', 'Every entry with its lines'] };
+    main.innerHTML = `<div class="list report-cards">${items.map(([k, l]) => `<button class="row" data-r="${k}"><span class="avatar">${A().I.reports}</span><span class="main"><span class="t">${esc(t(l))}</span><span class="m">${esc(A().lang() === 'ar' ? desc[k][0] : desc[k][1])}</span></span>${A().I.chevron}</button>`).join('')}</div>`;
     $$('[data-r]', main).forEach(b => b.addEventListener('click', () => A().go('reports/' + b.dataset.r)));
   }
 

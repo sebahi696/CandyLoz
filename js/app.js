@@ -209,31 +209,38 @@ window.App = (() => {
       can('eod') && `<button data-go="eod">${I.eod}${esc(t('quick_eod'))}</button>`,
       can('reports') ? `<button data-go="reports">${I.reports}${esc(t('reports'))}</button>` : `<button data-act="invoice">${I.file}${esc(t('quick_invoice'))}</button>`,
     ].filter(Boolean).join('');
-    main.innerHTML = `
-      <div class="card hero">
+    const branchTable = `<div class="tablewrap d-only" style="margin-top:14px"><table class="tbl" style="min-width:0"><thead><tr><th>${esc(t('branch'))}</th><th class="money">${esc(t('invoices'))}</th><th class="money">${esc(t('cash'))}</th><th class="money">${esc(t('cards'))}</th><th class="money">${esc(t('total'))}</th><th>${esc(t('eod'))}</th></tr></thead><tbody>${db.branches.map(b => { const d = S.daySales(db, t0, b.id); const closed = S.isClosed(db, t0, b.id); return `<tr><td>${esc(L(b))}</td><td class="money">${d.n}</td><td class="money">${money(d.byMethod.cash || 0)}</td><td class="money">${money((d.byMethod.mada || 0) + (d.byMethod.visa || 0) + (d.byMethod.tabby || 0) + (d.byMethod.transfer || 0))}</td><td class="money strong">${money(d.total)}</td><td>${d.n === 0 ? `<span class="pill bad">${esc(t('unposted'))}</span>` : closed ? `<span class="pill good">${esc(t('day_closed'))}</span>` : `<span class="pill warn">${esc(t('status_open'))}</span>`}</td></tr>`; }).join('')}</tbody></table></div>`;
+    main.innerHTML = `<div class="home">
+      <div class="card hero a-hero">
         <div class="label">${esc(t('sales_today'))} · ${esc(weekday(t0))} ${esc(fmtDateShort(t0))}</div>
         <div class="big"><span class="money">${money(td.total)}</span><span class="cur">${esc(t('sar'))} · ${esc(t('incl_vat'))}</span></div>
         ${delta !== null ? `<div class="delta ${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '▲' : '▼'} <span class="num">${Math.abs(delta).toFixed(1)}%</span> ${esc(t('vs_yesterday'))} · <span class="num">${td.n}</span> ${esc(t('invoices_n', { n: '' })).trim()}</div>` : ''}
         <div class="spark" aria-hidden="true">${spark.map(s => `<span class="${s.date === t0 ? 'today' : ''} ${s.dow === 5 || s.dow === 4 ? 'weekend' : ''}" style="height:${Math.max(4, s.v / max * 100)}%" title="${s.date}: ${money(s.v)}"></span>`).join('')}</div>
         <div class="stack">${byBranch.map(x => td.total ? `<span style="width:${x.v / td.total * 100}%;background:${x.c}"></span>` : '').join('')}</div>
         <div class="legend">${byBranch.map(x => `<span><i style="background:${x.c}"></i>${esc(L(x.b))} <b>${money(x.v, { whole: true })}</b></span>`).join('')}</div>
+        ${branchTable}
       </div>
-      <div class="section"><h2>${esc(t('needs_attention'))}</h2>${attention.length ? `<div class="tiles">${attention.join('')}</div>` : `<div class="notice good">${I.check}<span>${esc(t('all_clear'))}</span></div>`}</div>
-      <div class="section"><div class="quick">${quick}</div></div>
-      <div class="section"><h2>${esc(t('by_payment'))}</h2><div class="card">${['cash', 'mada', 'visa', 'tabby', 'transfer'].filter(m => td.byMethod[m]).map(m => `<div class="kv"><span class="k">${esc(methodName(m))}</span><span class="v money">${money(td.byMethod[m])}</span></div>`).join('') || `<div class="empty">${esc(t('no_sales_today'))}</div>`}</div></div>
+      <div class="section a-att"><h2>${esc(t('needs_attention'))}</h2>${attention.length ? `<div class="tiles">${attention.join('')}</div>` : `<div class="notice good">${I.check}<span>${esc(t('all_clear'))}</span></div>`}</div>
+      <div class="section a-quick"><div class="quick">${quick}</div></div>
+      <div class="section a-due d-only"><h2>${esc(t('upcoming_payments'))}</h2>${(() => { const due = db.supplierInvoices.filter(i => i.status === 'posted' && i.paid < i.total - 0.005).sort((x, y) => (x.due || x.date).localeCompare(y.due || y.date)).slice(0, 8); return due.length ? `<div class="tablewrap"><table class="tbl" style="min-width:0"><thead><tr><th>${esc(t('supplier'))}</th><th>${esc(t('due_date'))}</th><th class="money">${esc(t('remaining'))}</th></tr></thead><tbody>${due.map(i => { const st = S.invoiceStatus(i); return `<tr class="click" data-inv="${i.id}"><td class="strong">${esc(supName(i.supplierId))}</td><td class="num" style="${st === 'overdue' ? 'color:var(--bad);font-weight:600' : ''}">${i.due || ''}${st === 'overdue' ? ` · ${esc(t('status_overdue'))}` : ''}</td><td class="money">${money(i.total - i.paid)}</td></tr>`; }).join('')}</tbody></table></div>` : `<div class="notice good">${I.check}<span>${esc(t('all_clear'))}</span></div>`; })()}</div>
+      <div class="section a-pay"><h2>${esc(t('by_payment'))}</h2><div class="card">${['cash', 'mada', 'visa', 'tabby', 'transfer'].filter(m => td.byMethod[m]).map(m => `<div class="kv"><span class="k">${esc(methodName(m))}</span><span class="v money">${money(td.byMethod[m])}</span></div>`).join('') || `<div class="empty">${esc(t('no_sales_today'))}</div>`}</div></div>
+      </div>
       <p class="small muted" style="text-align:center;margin-top:20px">${esc(t('demo_banner'))}</p>`;
     $$('[data-go]', main).forEach(b => b.addEventListener('click', () => go(b.dataset.go)));
     $$('[data-act]', main).forEach(b => b.addEventListener('click', () => b.dataset.act === 'scan' ? invoiceForm({ scan: true }) : invoiceForm({})));
+    $$('[data-inv]', main).forEach(r => r.addEventListener('click', () => invoiceSheet(r.dataset.inv)));
   }
 
   // ---------- sales ----------
   let salesMode = 'import';
   function screenSales(main) {
     const imports = [...db.imports].reverse().slice(0, 12);
-    main.innerHTML = `
+    const impDates = (im) => im.dates.length === 1 ? fmtDate(im.dates[0]) : fmtDateShort(im.dates[0]) + ' → ' + fmtDateShort(im.dates[im.dates.length - 1]);
+    const impTable = `<div class="tablewrap d-only"><table class="tbl" style="min-width:0"><thead><tr><th>${esc(t('file'))}</th><th>${esc(t('date'))}</th><th class="money">${esc(t('invoices'))}</th><th class="money">${esc(t('total'))}</th><th>${esc(t('user_name'))}</th></tr></thead><tbody>${imports.map(im => `<tr><td>${esc(im.file || t('source_manual'))}</td><td>${esc(impDates(im))}</td><td class="money">${im.count}</td><td class="money">${money(im.total)}</td><td>${esc(userName(db.users.find(u => u.id === im.user)))}</td></tr>`).join('')}</tbody></table></div>`;
+    main.innerHTML = `<div class="cols"><div>
       <div class="seg" style="margin-bottom:14px"><button class="${salesMode === 'import' ? 'active' : ''}" data-mode="import">${esc(t('import_from_pos'))}</button><button class="${salesMode === 'manual' ? 'active' : ''}" data-mode="manual">${esc(t('manual_sales'))}</button></div>
-      <div id="salesbody"></div>
-      <div class="section"><h2>${esc(t('recent_imports'))}</h2><div class="list">${imports.length ? imports.map(im => `<div class="row"><span class="avatar">${im.source === 'manual' ? '✎' : I.file}</span><span class="main"><span class="t">${esc(im.file || t('source_manual'))}</span><span class="m">${esc(im.dates.length === 1 ? fmtDate(im.dates[0]) : fmtDateShort(im.dates[0]) + ' → ' + fmtDateShort(im.dates[im.dates.length - 1]))} · ${esc(t('invoices_n', { n: im.count }))} · ${esc(userName(db.users.find(u => u.id === im.user)))}</span></span><span class="end"><span class="money">${money(im.total)}</span></span></div>`).join('') : `<div class="empty">${esc(t('no_imports'))}</div>`}</div></div>`;
+      <div id="salesbody"></div></div>
+      <div><div class="section"><h2>${esc(t('recent_imports'))}</h2>${imports.length ? impTable + `<div class="list m-only">` + imports.map(im => `<div class="row"><span class="avatar">${im.source === 'manual' ? '✎' : I.file}</span><span class="main"><span class="t">${esc(im.file || t('source_manual'))}</span><span class="m">${esc(impDates(im))} · ${esc(t('invoices_n', { n: im.count }))} · ${esc(userName(db.users.find(u => u.id === im.user)))}</span></span><span class="end"><span class="money">${money(im.total)}</span></span></div>`).join('') + `</div>` : `<div class="empty">${esc(t('no_imports'))}</div>`}</div></div></div>`;
     $$('[data-mode]', main).forEach(b => b.addEventListener('click', () => { salesMode = b.dataset.mode; screenSales(main); }));
     const body = $('#salesbody', main);
     if (salesMode === 'import') {
@@ -297,16 +304,18 @@ window.App = (() => {
   let supTab = 'suppliers', supQuery = '', invFilter = 'all';
   function screenSuppliers(main, args) {
     if (args && args[0] === 'invoices') { supTab = 'invoices'; }
-    main.innerHTML = `<div class="seg" style="margin-bottom:12px"><button class="${supTab === 'suppliers' ? 'active' : ''}" data-tab="suppliers">${esc(t('suppliers'))}</button><button class="${supTab === 'invoices' ? 'active' : ''}" data-tab="invoices">${esc(t('invoices'))}</button></div><div id="supbody"></div>
-      <button class="fab" id="fab" aria-label="${esc(t('add'))}">${I.plus}</button>`;
+    main.innerHTML = `<div class="toolbar"><div class="seg inline" style="margin-bottom:12px"><button class="${supTab === 'suppliers' ? 'active' : ''}" data-tab="suppliers">${esc(t('suppliers'))}</button><button class="${supTab === 'invoices' ? 'active' : ''}" data-tab="invoices">${esc(t('invoices'))}</button></div>
+      <button class="fab d-only d-inline" id="fabd">${I.plus}<span>${esc(supTab === 'suppliers' ? t('add_supplier') : t('new_invoice'))}</span></button></div><div id="supbody"></div>
+      <button class="fab m-only" id="fab" aria-label="${esc(t('add'))}">${I.plus}</button>`;
     $$('[data-tab]', main).forEach(b => b.addEventListener('click', () => { supTab = b.dataset.tab; history.replaceState(null, '', '#/suppliers'); screenSuppliers(main); }));
-    $('#fab', main).addEventListener('click', () => supTab === 'suppliers' ? supplierForm({}) : invoiceForm({}));
+    $$('#fab, #fabd', main).forEach(b => b.addEventListener('click', () => supTab === 'suppliers' ? supplierForm({}) : invoiceForm({})));
     const body = $('#supbody', main);
     if (supTab === 'suppliers') {
       const q = supQuery.trim().toLowerCase();
       const list = db.suppliers.filter(s => !q || L(s).toLowerCase().includes(q) || (s.name || '').toLowerCase().includes(q) || (s.vat || '').includes(q)).map(s => ({ s, bal: S.supplierBalance(db, s.id) })).sort((a, b) => b.bal - a.bal);
+      const supTable = `<div class="tablewrap d-only"><table class="tbl"><thead><tr><th>${esc(t('supplier'))}</th><th>${esc(t('vat_number'))}</th><th>${esc(t('phone'))}</th><th>${esc(t('city'))}</th><th class="money">${esc(t('payment_terms'))}</th><th class="money">${esc(t('invoices'))}</th><th class="money">${esc(t('balance'))}</th></tr></thead><tbody>${list.map(({ s, bal }) => `<tr class="click" data-sup="${s.id}"><td class="strong">${esc(L(s))}</td><td class="num">${esc(s.vat)}</td><td class="num">${esc(s.phone || '')}</td><td>${esc(s.addr?.city || '')}</td><td class="money">${s.terms || 0}</td><td class="money">${db.supplierInvoices.filter(i => i.supplierId === s.id).length}</td><td class="money strong">${money(bal)}</td></tr>`).join('')}</tbody></table></div>`;
       body.innerHTML = `<div class="search">${I.search}<input class="input" id="supq" placeholder="${esc(t('search_suppliers'))}" value="${esc(supQuery)}"></div>
-        <div class="list">${list.length ? list.map(({ s, bal }) => `<button class="row" data-sup="${s.id}"><span class="avatar">${esc(initials(L(s)))}</span><span class="main"><span class="t">${esc(L(s))}</span><span class="m num">${esc(t('vat_number'))}: ${esc(s.vat)}</span></span><span class="end"><span class="money ${bal > 0 ? '' : ''}">${money(bal)}</span><span class="small muted">${bal > 0 ? esc(t('we_owe')) : '—'}</span></span></button>`).join('') : `<div class="empty">${esc(q ? t('no_results') : t('no_suppliers'))}</div>`}</div>`;
+        ${list.length ? supTable : ''}<div class="list m-only">${list.length ? list.map(({ s, bal }) => `<button class="row" data-sup="${s.id}"><span class="avatar">${esc(initials(L(s)))}</span><span class="main"><span class="t">${esc(L(s))}</span><span class="m num">${esc(t('vat_number'))}: ${esc(s.vat)}</span></span><span class="end"><span class="money">${money(bal)}</span><span class="small muted">${bal > 0 ? esc(t('we_owe')) : '—'}</span></span></button>`).join('') : `<div class="empty">${esc(q ? t('no_results') : t('no_suppliers'))}</div>`}</div>${!list.length ? `<div class="empty d-only">${esc(q ? t('no_results') : t('no_suppliers'))}</div>` : ''}`;
       $('#supq', body).addEventListener('input', (e) => { supQuery = e.target.value; screenSuppliers(main); const i = $('#supq', main); i.focus(); i.setSelectionRange(i.value.length, i.value.length); });
       $$('[data-sup]', body).forEach(b => b.addEventListener('click', () => supplierSheet(b.dataset.sup)));
     } else {
@@ -314,8 +323,9 @@ window.App = (() => {
       const counts = {}; for (const x of all) counts[x.st] = (counts[x.st] || 0) + 1;
       const filters = ['all', 'draft', 'due', 'overdue', 'partial', 'paid'];
       const list = all.filter(x => invFilter === 'all' || x.st === invFilter);
+      const invTable = `<div class="tablewrap d-only"><table class="tbl"><thead><tr><th>${esc(t('supplier'))}</th><th>${esc(t('invoice_no'))}</th><th>${esc(t('invoice_date'))}</th><th>${esc(t('due_date'))}</th><th>${esc(t('branch'))}</th><th class="money">${esc(t('subtotal'))}</th><th class="money">${esc(t('vat_15'))}</th><th class="money">${esc(t('total'))}</th><th class="money">${esc(t('remaining'))}</th><th>${esc(t('status_posted'))}</th></tr></thead><tbody>${list.map(({ i, st }) => `<tr class="click" data-inv="${i.id}"><td class="strong">${esc(supName(i.supplierId))}</td><td class="code">${esc(i.no)}</td><td class="num">${i.date}</td><td class="num">${i.due || ''}</td><td>${esc(branchName(i.branch))}</td><td class="money">${money(i.subtotal)}</td><td class="money">${money(i.vat)}</td><td class="money strong">${money(i.total)}</td><td class="money">${i.status === 'draft' ? '' : money(i.total - i.paid)}</td><td>${statusPill(st)}</td></tr>`).join('')}</tbody></table></div>`;
       body.innerHTML = `<div class="chips">${filters.map(f => `<button class="chip ${invFilter === f ? 'active' : ''}" data-f="${f}">${esc(f === 'all' ? t('all') : t('status_' + f))}${f !== 'all' && counts[f] ? ` <b>${counts[f]}</b>` : ''}</button>`).join('')}</div>
-        <div class="list">${list.length ? list.map(({ i, st }) => `<button class="row" data-inv="${i.id}"><span class="avatar">${esc(initials(supName(i.supplierId)))}</span><span class="main"><span class="t">${esc(supName(i.supplierId))}</span><span class="m"><span class="num">${esc(i.no)}</span> · ${esc(fmtDateShort(i.date))}${i.due ? ` · ${esc(t('due_date'))} ${esc(fmtDateShort(i.due))}` : ''}</span></span><span class="end"><span class="money">${money(i.total)}</span>${statusPill(st)}</span></button>`).join('') : `<div class="empty">${esc(t('empty_list'))}</div>`}</div>`;
+        ${list.length ? invTable : `<div class="empty d-only">${esc(t('empty_list'))}</div>`}<div class="list m-only">${list.length ? list.map(({ i, st }) => `<button class="row" data-inv="${i.id}"><span class="avatar">${esc(initials(supName(i.supplierId)))}</span><span class="main"><span class="t">${esc(supName(i.supplierId))}</span><span class="m"><span class="num">${esc(i.no)}</span> · ${esc(fmtDateShort(i.date))}${i.due ? ` · ${esc(t('due_date'))} ${esc(fmtDateShort(i.due))}` : ''}</span></span><span class="end"><span class="money">${money(i.total)}</span>${statusPill(st)}</span></button>`).join('') : `<div class="empty">${esc(t('empty_list'))}</div>`}</div>`;
       $$('[data-f]', body).forEach(b => b.addEventListener('click', () => { invFilter = b.dataset.f; screenSuppliers(main); }));
       $$('[data-inv]', body).forEach(b => b.addEventListener('click', () => invoiceSheet(b.dataset.inv)));
     }
@@ -469,7 +479,7 @@ window.App = (() => {
     const closed = db.eod.find(e => e.date === eodDate && e.branch === eodBranch && !e.reopened);
     const invToday = db.supplierInvoices.filter(i => i.date === eodDate && i.branch === eodBranch);
     const open = openDays(); const recent = [...db.eod].filter(e => !e.reopened).sort((a, b) => b.date.localeCompare(a.date) || b.at.localeCompare(a.at)).slice(0, 8);
-    main.innerHTML = `
+    main.innerHTML = `<div class="cols"><div>
       <div class="chips">${db.branches.map(b => `<button class="chip ${eodBranch === b.id ? 'active' : ''}" data-b="${b.id}">${esc(L(b))}</button>`).join('')}</div>
       <div class="card"><div class="grid2">${field(t('date'), dateInput('date', eodDate))}<div class="field"><label>${esc(t('invoices_today'))}</label><div class="input" style="display:flex;align-items:center;justify-content:space-between"><span class="num">${ds.n}</span><span class="money strong">${money(ds.total)}</span></div></div></div>
         ${['cash', 'mada', 'visa', 'tabby', 'transfer'].filter(m => ds.byMethod[m]).map(m => `<div class="kv"><span class="k">${esc(methodName(m))}</span><span class="v money">${money(ds.byMethod[m])}</span></div>`).join('')}
@@ -487,8 +497,10 @@ window.App = (() => {
           <div class="kv total"><span class="k">${esc(t('difference'))}</span><span class="v" id="diff">${diffPill(0)}</span></div>
           ${field(t('notes'), `<textarea class="input" name="notes" rows="2"></textarea>`)}
           <button class="btn primary" type="submit">${esc(t('close_day'))} · ${esc(branchName(eodBranch))} · ${esc(fmtDateShort(eodDate))}</button></form>`}
+      </div><div>
       ${open.length ? `<div class="section"><h2>${esc(t('open_days'))} <span class="pill warn">${open.length}</span></h2><div class="list">${open.map(o => `<button class="row" data-open="${o.date}|${o.branch}"><span class="avatar ${o.branch}">${esc(branch(o.branch).code)}</span><span class="main"><span class="t">${esc(weekday(o.date))} ${esc(fmtDateShort(o.date))}</span><span class="m">${esc(branchName(o.branch))}</span></span><span class="end"><span class="money">${money(S.daySales(db, o.date, o.branch).total)}</span><span class="pill warn">${esc(t('status_open'))}</span></span></button>`).join('')}</div></div>` : ''}
-      <div class="section"><h2>${esc(t('recent_closings'))}</h2><div class="list">${recent.length ? recent.map(e => `<div class="row"><span class="avatar ${e.branch}">${esc(branch(e.branch).code)}</span><span class="main"><span class="t">${esc(fmtDate(e.date))} · ${esc(branchName(e.branch))}</span><span class="m">${esc(t('counted_cash'))} <span class="money">${money(e.counted)}</span> · ${esc(userName(db.users.find(u => u.id === e.user)))}</span></span><span class="end">${diffPill(e.diff)}</span></div>`).join('') : `<div class="empty">${esc(t('empty_list'))}</div>`}</div></div>`;
+      <div class="section"><h2>${esc(t('recent_closings'))}</h2><div class="list">${recent.length ? recent.map(e => `<div class="row"><span class="avatar ${e.branch}">${esc(branch(e.branch).code)}</span><span class="main"><span class="t">${esc(fmtDate(e.date))} · ${esc(branchName(e.branch))}</span><span class="m">${esc(t('counted_cash'))} <span class="money">${money(e.counted)}</span> · ${esc(userName(db.users.find(u => u.id === e.user)))}</span></span><span class="end">${diffPill(e.diff)}</span></div>`).join('') : `<div class="empty">${esc(t('empty_list'))}</div>`}</div></div>
+      </div></div>`;
     $$('[data-b]', main).forEach(b => b.addEventListener('click', () => { eodBranch = b.dataset.b; screenEOD(main); }));
     $('[name=date]', main).addEventListener('change', (e) => { eodDate = e.target.value; screenEOD(main); });
     $$('[data-open]', main).forEach(b => b.addEventListener('click', () => { const [d, br] = b.dataset.open.split('|'); eodDate = d; eodBranch = br; screenEOD(main); window.scrollTo(0, 0); }));
@@ -508,16 +520,18 @@ window.App = (() => {
     if (sub === 'users' && can('users')) return screenUsers(main);
     if (sub === 'branches' && can('settings')) return screenBranches(main);
     if (sub === 'accounts' && can('accounts')) return screenAccounts(main);
-    main.innerHTML = `
+    main.innerHTML = `<div class="cols eq"><div>
       <div class="card" style="display:flex;align-items:center;gap:12px"><span class="avatar">${esc(initials(userName(u)))}</span><div style="flex:1"><div class="strong">${esc(userName(u))}</div><div class="small muted">${esc(t('role_' + u.role))}${u.branch ? ' · ' + esc(branchName(u.branch)) : ''}</div></div><button class="btn secondary sm" data-signout>${esc(t('signout'))}</button></div>
       <div class="section"><h2>${esc(t('language'))}</h2><div class="seg"><button class="${lang() === 'ar' ? 'active' : ''}" data-setlang="ar">العربية</button><button class="${lang() === 'en' ? 'active' : ''}" data-setlang="en">English</button></div></div>
       <div class="section"><h2>${esc(t('theme'))}</h2><div class="seg">${['auto', 'light', 'dark'].map(x => `<button class="${theme === x ? 'active' : ''}" data-theme="${x}">${esc(t('theme_' + x))}</button>`).join('')}</div></div>
+      </div><div>
       ${can('settings') ? `<div class="section"><h2>${esc(t('settings'))}</h2><div class="list">
         <button class="row" data-sub="company"><span class="main"><span class="t">${esc(t('company'))}</span><span class="m">${esc(L({ ar: db.company.name, en: db.company.nameEn }))} · ${esc(t('vat_number'))} <span class="num">${esc(db.company.vat)}</span></span></span>${I.chevron}</button>
         <button class="row" data-sub="branches"><span class="main"><span class="t">${esc(t('branches'))}</span><span class="m">${db.branches.length}</span></span>${I.chevron}</button>
         ${can('users') ? `<button class="row" data-sub="users"><span class="main"><span class="t">${esc(t('users'))}</span><span class="m">${db.users.length}</span></span>${I.chevron}</button>` : ''}
         <button class="row" data-sub="accounts"><span class="main"><span class="t">${esc(t('chart_of_accounts'))}</span><span class="m">${db.accounts.length}</span></span>${I.chevron}</button></div></div>` : can('accounts') ? `<div class="section"><div class="list"><button class="row" data-sub="accounts"><span class="main"><span class="t">${esc(t('chart_of_accounts'))}</span><span class="m">${db.accounts.length}</span></span>${I.chevron}</button></div></div>` : ''}
       <div class="section"><h2>${esc(t('backup'))}</h2><div class="actions-inline"><button class="btn secondary sm" data-export>${I.download}${esc(t('export_backup'))}</button><label class="btn secondary sm" for="bkfile">${I.upload}${esc(t('import_backup'))}</label><input id="bkfile" type="file" accept="application/json" class="sr">${can('settings') ? `<button class="btn sm danger" data-reset>${esc(t('reset_demo'))}</button>` : ''}</div><div id="confirm" style="margin-top:10px"></div></div>
+      </div></div>
       <p class="small muted" style="text-align:center;margin-top:28px">${esc(t('app'))} · ${esc(t('byHunters'))} · v0.1 prototype</p>`;
     $('[data-signout]', main).addEventListener('click', () => { session = null; sessionStorage.removeItem('daftar.session'); go('home'); render(); });
     $$('[data-setlang]', main).forEach(b => b.addEventListener('click', () => { I18N.setLang(b.dataset.setlang); render(); }));
@@ -535,7 +549,7 @@ window.App = (() => {
   function subHeader(main, title) { $('#title').innerHTML = `<button class="iconbtn" data-back style="margin-inline-end:8px;vertical-align:middle">${I.back}</button>${esc(title)}`; $('[data-back]').addEventListener('click', () => go('more')); }
   function screenUsers(main) {
     subHeader(main, t('users'));
-    main.innerHTML = `<div class="list">${db.users.map(u => `<button class="row" data-u="${u.id}"><span class="avatar">${esc(initials(userName(u)))}</span><span class="main"><span class="t">${esc(userName(u))}</span><span class="m">${esc(t('role_' + u.role))}${u.branch ? ' · ' + esc(branchName(u.branch)) : ''}</span></span><span class="pill ${u.active ? 'good' : 'neutral'}">${esc(t(u.active ? 'active' : 'inactive'))}</span></button>`).join('')}</div><button class="fab" id="fab">${I.plus}</button>`;
+    main.innerHTML = `<div class="list narrow">${db.users.map(u => `<button class="row" data-u="${u.id}"><span class="avatar">${esc(initials(userName(u)))}</span><span class="main"><span class="t">${esc(userName(u))}</span><span class="m">${esc(t('role_' + u.role))}${u.branch ? ' · ' + esc(branchName(u.branch)) : ''}</span></span><span class="pill ${u.active ? 'good' : 'neutral'}">${esc(t(u.active ? 'active' : 'inactive'))}</span></button>`).join('')}</div><button class="fab" id="fab">${I.plus}</button>`;
     $$('[data-u]', main).forEach(b => b.addEventListener('click', () => userForm(db.users.find(x => x.id === b.dataset.u))));
     $('#fab', main).addEventListener('click', () => userForm({}));
   }
@@ -548,7 +562,7 @@ window.App = (() => {
   }
   function screenBranches(main) {
     subHeader(main, t('branches'));
-    main.innerHTML = `<div class="list">${db.branches.map(b => `<button class="row" data-b="${b.id}"><span class="avatar ${b.id}">${esc(b.code)}</span><span class="main"><span class="t">${esc(L(b))}</span><span class="m">${esc(b.city || '')}</span></span>${I.chevron}</button>`).join('')}</div><button class="fab" id="fab">${I.plus}</button>`;
+    main.innerHTML = `<div class="list narrow">${db.branches.map(b => `<button class="row" data-b="${b.id}"><span class="avatar ${b.id}">${esc(b.code)}</span><span class="main"><span class="t">${esc(L(b))}</span><span class="m">${esc(b.city || '')}</span></span>${I.chevron}</button>`).join('')}</div><button class="fab" id="fab">${I.plus}</button>`;
     const form = (b) => openSheet({ title: b.id ? t('edit') : t('add_branch'), body: `<form id="bf">${field(t('branch_name') + ' (ع)', inp('ar', b.ar || '', 'required'))}${field(t('branch_name') + ' (EN)', inp('en', b.en || ''))}<div class="grid2">${field(t('code'), inp('code', b.code || '', 'dir="ltr" style="text-transform:uppercase" maxlength="4"'))}${field(t('city'), inp('city', b.city || ''))}</div><button class="btn primary" type="submit">${esc(t('save'))}</button></form>`, onMount: (sh) => { $('#bf', sh).addEventListener('submit', (e) => { e.preventDefault(); const d = formData(e.target); const rec = { id: b.id || S.uid(), ar: d.ar, en: d.en || d.ar, code: (d.code || d.ar.slice(0, 3)).toUpperCase(), city: d.city }; const i = db.branches.findIndex(x => x.id === rec.id); if (i >= 0) db.branches[i] = rec; else db.branches.push(rec); persist(); closeSheet(); toast(t('branch_saved')); render(); }); } });
     $$('[data-b]', main).forEach(x => x.addEventListener('click', () => form(branch(x.dataset.b))));
     $('#fab', main).addEventListener('click', () => form({}));

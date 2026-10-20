@@ -75,8 +75,8 @@ main.wide { max-width: 1080px; }
   .rail .who { padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px; }
   .tabbar { display: none; }
   .fab { bottom: 28px; inset-inline-end: 28px; }
-  main { padding: 8px 32px 80px; }
-  .topbar { padding: 18px 32px 10px; }
+  main, main.wide { max-width: 1280px; padding: 8px 32px 80px; }
+  .topbar { padding: 18px 32px 10px; max-width: 1344px; }
   .topbar h1 { font-size: 26px; }
 }
 
@@ -111,7 +111,7 @@ main.wide { max-width: 1080px; }
 .quick button { height: 56px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); display: flex; align-items: center; gap: 10px; padding: 0 14px; font-weight: 600; font-size: 14px; color: var(--ink); text-align: start; }
 .quick button svg { width: 22px; height: 22px; color: var(--accent); flex: none; }
 .quick button:active { transform: scale(.98); }
-@media (min-width: 1024px) { .quick { grid-template-columns: repeat(4, 1fr); } .tiles { grid-template-columns: repeat(4, 1fr); } }
+@media (min-width: 1024px) { .quick { grid-template-columns: repeat(4, 1fr); } .tiles { grid-template-columns: repeat(4, 1fr); } .a-att .tiles, .a-quick .quick { grid-template-columns: 1fr 1fr; } }
 
 .list { display: flex; flex-direction: column; gap: 8px; }
 .row { display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; width: 100%; text-align: start; color: inherit; text-decoration: none; min-height: 60px; }
@@ -259,4 +259,40 @@ table.tbl { border-collapse: collapse; width: 100%; min-width: 560px; font-size:
   .tablewrap { border: 0; overflow: visible; }
   table.tbl { min-width: 0; font-size: 11px; }
   .tbl th { position: static; }
+}
+
+/* ---- desktop layouts (>= 1024px): two-column panels, data tables ---- */
+.d-only { display: none !important; }
+@media (min-width: 1024px) {
+  .d-only { display: block !important; }
+  .m-only { display: none !important; }
+  .cols { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+  .cols.eq { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .cols > div > .section:first-child { margin-top: 0; }
+  .home { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); grid-template-areas: "hero att" "hero quick" "pay due"; grid-template-rows: auto 1fr auto; gap: 20px; align-items: start; }
+  .home > .a-hero { grid-area: hero; } .home > .a-att { grid-area: att; margin-top: 0; } .home > .a-quick { grid-area: quick; margin-top: 0; } .home > .a-pay { grid-area: pay; margin-top: 0; } .home > .a-due { grid-area: due; margin-top: 0; }
+  .hero { padding: 24px 24px 18px; }
+  .hero .big { font-size: 44px; }
+  .spark { height: 110px; }
+  .list.narrow, .narrow { max-width: 760px; }
+  .seg.inline { width: auto; display: inline-flex; min-width: 320px; }
+  .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+  .toolbar .search { margin: 0; flex: 1; max-width: 420px; }
+  .toolbar .chips { padding: 0; margin: 0; }
+  .fab.d-inline { position: static; width: auto; height: 44px; border-radius: 12px; padding: 0 16px 0 12px; display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; box-shadow: none; }
+  .fab.d-inline svg { width: 20px; height: 20px; }
+  table.tbl tbody tr.click { cursor: pointer; }
+  table.tbl tbody tr.click:hover td { background: var(--accent-soft); }
+  .report-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .report-cards .row { min-height: 96px; align-items: flex-start; padding: 18px; }
+  .report-cards .row .m { white-space: normal; }
+  .login .users { max-width: 760px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .login .mark h1 { font-size: 40px; }
+  .sheet { width: min(640px, calc(100vw - 32px)); }
+  .sheet.wide { width: min(900px, calc(100vw - 32px)); }
+  .sheet.wide .grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .kv { padding: 10px 0; }
+}
+@media (min-width: 1280px) {
+  .home { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); }
 }
