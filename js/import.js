@@ -82,8 +82,10 @@ window.PosImport = (() => {
     const s = norm(latinDigits(v));
     if (!s) return 'cash';
     if (/mada|مدى|مدي/.test(s)) return 'mada';
-    if (/tabby|tamara|تابي|تمارا|bnpl/.test(s)) return 'tabby';
+    if (/tamara|تمارا/.test(s)) return 'tamara';
+    if (/tabby|تابي|bnpl/.test(s)) return 'tabby';
     if (/visa|master|card|credit|debit|بطاقة|فيزا|ماستر|شبكة/.test(s)) return 'visa';
+    if (/salla|سلة/.test(s)) return 'salla';
     if (/transfer|bank|تحويل|بنك|stc|apple|آبل/.test(s)) return 'transfer';
     return 'cash';
   }

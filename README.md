@@ -1,49 +1,37 @@
-# دفتر — Daftar
+# دفتر — Daftar v0.2
 
-**نظام محاسبة كامل فوق نقاط البيع (SkySystem) — نموذج أولي لكاندي لوز من شركة هنترز.**
-**Full accounting on top of the SkySystem POS — prototype for Candy Loz by Hunters.**
+**نظام محاسبي متكامل فوق نقاط البيع — مخصص لكاندي لوز، من شركة هنترز.**
+**Full accounting system on top of the SkySystem POS — customised for Candy Loz, by Hunters.**
 
-> نسخة تجريبية: كل البيانات محفوظة على جهازك فقط (localStorage). الرمز السري لكل الحسابات التجريبية **1234**.
-> Demo build: all data lives in your browser only. PIN for every demo account is **1234**.
+Live demo: https://sebahi696.github.io/CandyLoz/
 
-## ما الذي يفعله النموذج / What the prototype does
-
-| | العربية | English |
+## Demo logins (PIN)
+| User | Role | PIN |
 |---|---|---|
-| اللغة | عربي افتراضياً مع خيار الإنجليزية (RTL/LTR كامل) | Arabic by default, English toggle |
-| الأدوار | مدير (تحكم كامل + تقارير) · محاسب (قيود + تقارير) · مشغّل (استيراد مبيعات، فواتير موردين، إقفال اليوم — بدون تقارير) | Admin · Accountant · Operator (no reports) |
-| المبيعات | استيراد تصدير SkySystem (CSV/XLSX) مع مطابقة أعمدة تلقائية، منع التكرار، ترحيل تلقائي للقيود | POS export import with auto column matching, dedupe, auto journal posting |
-| الموردون | الاسم، الرقم الضريبي (تحقق 15 رقم)، العنوان الوطني، مدة السداد، الرصيد | Name, VAT no. (validated), national address, terms, balance |
-| فواتير الموردين | يدوي أو **تصوير الفاتورة** → قراءة (OCR) → تعبئة الحقول → ترحيل. تسجيل السداد | Manual or **photo → OCR → prefilled form → post**. Record payments |
-| إقفال اليوم | النقد المتوقع مقابل الفعلي لكل فرع، عجز/زيادة يُرحّل تلقائياً، أيام مفتوحة | Expected vs counted cash per branch, over/short auto-posted, open days |
-| التقارير | ميزان المراجعة، كشف حساب (مورد/حساب)، قائمة الدخل، إقرار الضريبة، المبيعات، أعمار الذمم، دفتر اليومية — تصدير CSV وطباعة | Trial balance, statement of account, P&L, VAT return, sales, aged payables, journal — CSV + print |
-| الجوال | PWA قابل للتثبيت، شاشات بإبهام واحد، وضع داكن | Installable PWA, one-thumb screens, dark mode |
+| فهد العمري | Admin (client) | 1234 |
+| نورة السبيعي | Accountant | 1234 |
+| سعيد / محمد / أحمد | Operator (one per branch) | 1234 |
+| فريق هنترز | **Super admin (Hunters platform)** | 0000 |
 
-## التشغيل / Run
+Data lives in the browser (localStorage) — each device has its own demo copy. "Reset demo data" is under More.
 
-ملفات ثابتة فقط — افتح `index.html` من أي خادم ثابت (GitHub Pages، Netlify، أو `python3 -m http.server`).
-Static files only — serve the folder from any static host.
+## Modules
+**Sales:** SkySystem export import (CSV/XLSX, auto column matching, dedupe) · manual daily entry · end-of-day cash close per branch · customers & credit invoices.
+**Purchases & expenses:** suppliers (VAT no., national address, own ledger sub-account) · purchase invoices (manual or photo OCR) · multi-line expenses with VAT.
+**Accounting:** 5-level chart of accounts tailored to a confectionery retailer (branch cash boxes, mada/Visa/Tabby/Tamara/Salla receivables, inventory by category, spoilage, gateway fees…) · journal entries with 14 operation types, manual & opening entries, reversal · receipt / payment / transfer vouchers (with fee & invoice allocation) · fixed assets register with monthly straight-line depreciation · payment methods mapped to GL accounts · accounting settings (fiscal year, period lock, zakat, inventory system, printing, system-account mapping) · year-end close.
+**Reports:** trial balance (levels 1–5, tree/level/leaf) · income statement · balance sheet (balances, includes current-period profit) · cash flow (indirect, reconciled) · account statement (detail or monthly) · supplier / customer / cash balances · aged payables · VAT return · sales · expenses · general journal. CSV export + print.
+**Admin:** users (with plan limits), branches (auto-creates cash box + sales account), roles & permissions matrix, company profile, backup/restore.
+**Hunters platform (super admin):** list of client companies, add a new company, switch any of 33 features on/off per client, plan & user/branch limits, suspend, open any company as admin for support.
 
-## الهيكل / Structure
-
+## Code
 ```
-index.html        shell + fonts + scripts
-css/app.css       design tokens (light/dark), RTL-aware layout, components
-js/i18n.js        AR/EN dictionary, number & date formatting
-js/store.js       data model, seed data, double-entry ledger engine, reports math (pure JS, testable in Node)
-js/import.js      POS export parser (CSV/XLSX), column auto-matching, sample generator
-js/ocr.js         invoice photo → text (Tesseract.js, loaded on demand) → field extraction
-js/app.js         routing, roles, screens (home, sales, suppliers, invoices, EOD, settings)
-js/reports.js     report screens
-samples/          sample SkySystem export
+js/store.js    multi-tenant store + double-entry engine + reports (pure JS, Node-testable)
+js/i18n.js     Arabic/English dictionary
+js/ui.js       UI primitives (sheets, forms, account picker, tables)
+js/app.js      shell, session, permissions, feature flags, navigation, dashboard, platform
+js/ops.js      sales import, end of day, customers, suppliers, purchases (OCR), expenses
+js/acct.js     chart of accounts, journal, vouchers, fixed assets, payment methods, settings, users, roles
+js/reports.js  financial statements & reports
 ```
 
-## الخطوة التالية (الإنتاج) / Production path
-
-- قاعدة بيانات سحابية ومستخدمون حقيقيون (Supabase/Postgres + صلاحيات على مستوى الصف).
-- قراءة الفواتير بنموذج رؤية (LLM) بدل OCR المحلي لدقة أعلى على الفواتير العربية.
-- ربط مباشر مع SkySystem إن توفر API، وإلا جدولة استيراد تلقائي.
-- فوترة إلكترونية (ZATCA المرحلة الثانية) عند الحاجة.
-
----
 Hunters Company · 2026

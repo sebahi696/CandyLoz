@@ -1,149 +1,191 @@
-/* Daftar — reports (admin / accountant) */
-window.Reports = (() => {
-  const S = Store;
-  const A = () => window.App;
-  const $ = (s, el = document) => el.querySelector(s);
-  const $$ = (s, el = document) => [...el.querySelectorAll(s)];
-  const { t, money, fmtDate } = I18N;
-  const esc = (s) => A().esc(s);
+/* Daftar — reports & financial statements */
+(() => {
+  const { t, money, fmtDate, fmtMonth } = I18N;
+  const S = Store, U = UI, A = App; const { $, $$, esc, L, icon } = U;
+  const db = () => A.db;
+  const P = { preset: 'this_month', branch: '', asOf: null };
+  const REPORTS = [
+    { g: 'rep_g_statements', items: [['tb', 'rep_tb'], ['is', 'rep_is'], ['bs', 'rep_bs'], ['cf', 'rep_cf']] },
+    { g: 'rep_g_ledgers', items: [['statement', 'rep_statement'], ['supbal', 'rep_supbal'], ['custbal', 'rep_custbal'], ['cash', 'rep_cash'], ['aged', 'rep_aged']] },
+    { g: 'rep_g_ops', items: [['vat', 'rep_vat'], ['sales', 'rep_sales'], ['exp', 'rep_exp'], ['journal', 'rep_journal']] },
+  ];
+  const FEAT = Object.fromEntries(REPORTS.flatMap(g => g.items));
+  const feature = (k) => S.FEATURES.find(f => f.key === FEAT[k]);
+  const fmt = (v) => money(v, { paren: true });
+  const company = () => L({ ar: db().company.name, en: db().company.nameEn });
 
-  let period = { preset: 'this_month', from: null, to: null };
-  function periodRange() {
-    const t0 = S.todayISO(); const y = t0.slice(0, 4), m = +t0.slice(5, 7);
-    const p = period.preset;
-    if (p === 'custom' && period.from && period.to) return [period.from, period.to];
-    if (p === 'last_month') { const d = new Date(Date.UTC(+y, m - 2, 1)); const from = d.toISOString().slice(0, 10); const to = new Date(Date.UTC(+y, m - 1, 0)).toISOString().slice(0, 10); return [from, to]; }
-    if (p === 'this_quarter') { const qm = Math.floor((m - 1) / 3) * 3 + 1; return [`${y}-${String(qm).padStart(2, '0')}-01`, t0]; }
-    if (p === 'ytd') return [`${y}-01-01`, t0];
-    return [`${t0.slice(0, 8)}01`, t0];
-  }
-  function periodBar(extra = '') {
-    const [from, to] = periodRange();
-    return `<div class="report-head no-print">
-      <div class="chips" style="padding:0;margin:0;flex:1">${['this_month', 'last_month', 'this_quarter', 'ytd', 'custom'].map(p => `<button class="chip ${period.preset === p ? 'active' : ''}" data-p="${p}">${esc(t(p))}</button>`).join('')}</div>
-      ${period.preset === 'custom' ? `<input class="input" type="date" data-from value="${from}" dir="ltr"><input class="input" type="date" data-to value="${to}" dir="ltr">` : ''}
-      ${extra}
-      <button class="btn secondary sm" data-csv>${A().I.download}${esc(t('export_csv'))}</button><button class="btn secondary sm" data-print>${A().I.print}${esc(t('print'))}</button></div>`;
-  }
-  function bindPeriod(main, rerender) {
-    $$('[data-p]', main).forEach(b => b.addEventListener('click', () => { period.preset = b.dataset.p; if (b.dataset.p === 'custom') { const [f, to] = periodRange(); period.from = period.from || f; period.to = period.to || to; } rerender(); }));
-    const f = $('[data-from]', main), to = $('[data-to]', main);
-    if (f) f.addEventListener('change', () => { period.from = f.value; rerender(); });
-    if (to) to.addEventListener('change', () => { period.to = to.value; rerender(); });
-    $('[data-print]', main).addEventListener('click', () => window.print());
-  }
-  function title(main, name, sub) {
-    $('#title').innerHTML = `<button class="iconbtn" data-back style="margin-inline-end:8px;vertical-align:middle">${A().I.back}</button>${esc(name)}`;
-    $('[data-back]').addEventListener('click', () => A().go('reports'));
-    const [from, to] = periodRange();
-    return `<div class="report-title"><h2>${esc(A().lang() === 'ar' ? A().db.company.name : A().db.company.nameEn)} — ${esc(name)}</h2><div class="muted">${esc(sub || `${t('period')}: ${fmtDate(from)} → ${fmtDate(to)}`)}</div></div>`;
-  }
-  const th = (cols) => `<thead><tr>${cols.map(c => `<th class="${c.r ? 'money' : ''}">${esc(c.l)}</th>`).join('')}</tr></thead>`;
+  Screens.reports = (main, args) => {
+    const k = args[0];
+    if (k && FEAT[k]) { if (!A.feat(FEAT[k])) { main.innerHTML = U.empty(t('no_access')); return; } if (k === 'journal') { A.go('journal'); return; } A.setTitle(L(feature(k)), 'reports'); return R[k](main, args.slice(1)); }
+    main.innerHTML = REPORTS.map(g => { const items = g.items.filter(([, f]) => A.feat(f) && (f !== 'rep_custbal' || A.feat('customers'))); return items.length ? `<div class="section"><h2>${esc(t(g.g))}</h2><div class="report-cards">${items.map(([key, f]) => `<button class="row" data-r="${key}"><span class="avatar">${icon('reports')}</span><span class="main"><span class="t">${esc(L(S.FEATURES.find(x => x.key === f)))}</span><span class="m">${esc(t('rep_hint_' + key))}</span></span>${icon('chevron')}</button>`).join('')}</div></div>` : ''; }).join('');
+    $$('[data-r]', main).forEach(b => b.onclick = () => A.go('reports/' + b.dataset.r));
+  };
+  const head = (name, sub) => `<div class="report-title"><h2>${esc(company())} — ${esc(name)}</h2><div class="muted">${esc(sub)}</div></div>`;
+  const periodSub = () => { const [f, to] = A.periodRange(P); return `${t('period')}: ${fmtDate(f)} → ${fmtDate(to)}${P.branch ? ' · ' + A.branchName(P.branch) : ''}`; };
+  const R = {};
 
-  function screen(main, args) {
-    const which = args && args[0];
-    if (!A().can('reports')) { main.innerHTML = `<div class="empty">${esc(t('no_access'))}</div>`; return; }
-    const map = { tb: trialBalance, statement, pnl, vat, sales, aged, journal };
-    if (which && map[which]) return map[which](main, args.slice(1));
-    const items = [
-      ['tb', 'trial_balance'], ['statement', 'statement_of_account'], ['pnl', 'pnl'], ['vat', 'vat_report'], ['sales', 'sales_report'], ['aged', 'aged_payables'], ['journal', 'general_journal'],
-    ];
-    const desc = { tb: ['أرصدة كل الحسابات مدين/دائن مع الافتتاحي والختامي', 'All accounts, debit/credit with opening and closing'], statement: ['حركة مورد أو حساب مع الرصيد الجاري', 'Movements for a supplier or account with running balance'], pnl: ['الإيرادات وتكلفة المبيعات والمصروفات وصافي الربح', 'Revenue, cost of sales, expenses, net profit'], vat: ['ضريبة المخرجات والمدخلات وصافي المستحق', 'Output vs input VAT and net payable'], sales: ['المبيعات حسب الفرع وطريقة الدفع واليوم', 'Sales by branch, payment method and day'], aged: ['المستحق للموردين حسب عمر الدين', 'What is owed to suppliers by age'], journal: ['كل القيود بتفاصيل الأطراف', 'Every entry with its lines'] };
-    main.innerHTML = `<div class="list report-cards">${items.map(([k, l]) => `<button class="row" data-r="${k}"><span class="avatar">${A().I.reports}</span><span class="main"><span class="t">${esc(t(l))}</span><span class="m">${esc(A().lang() === 'ar' ? desc[k][0] : desc[k][1])}</span></span>${A().I.chevron}</button>`).join('')}</div>`;
-    $$('[data-r]', main).forEach(b => b.addEventListener('click', () => A().go('reports/' + b.dataset.r)));
-  }
+  // ---------------------------------------------------------------- trial balance
+  const TB = { level: 3, mode: 'tree', type: '', hideZero: true, q: '' };
+  R.tb = (main) => {
+    const d = db(); const [from, to] = A.periodRange(P);
+    const r = S.trialBalance(d, { from, to, branch: P.branch, level: TB.level, mode: TB.mode, type: TB.type, hideZero: TB.hideZero, q: TB.q });
+    const extra = `<select class="select fb" data-lv aria-label="${esc(t('level'))}">${[1, 2, 3, 4, 5].map(l => `<option value="${l}" ${TB.level === l ? 'selected' : ''}>${esc(t('level'))} ${l}</option>`).join('')}</select>
+      <select class="select fb" data-mode>${['tree', 'level', 'leaf'].map(m => `<option value="${m}" ${TB.mode === m ? 'selected' : ''}>${esc(t('mode_' + m))}</option>`).join('')}</select>
+      <select class="select fb" data-ty><option value="">${esc(t('acc_type'))}: ${esc(t('all'))}</option>${['asset', 'liability', 'equity', 'revenue', 'cogs', 'expense'].map(x => `<option value="${x}" ${TB.type === x ? 'selected' : ''}>${esc(t('t_' + x))}</option>`).join('')}</select>
+      <input class="input fb" data-q placeholder="${esc(t('search'))}" value="${esc(TB.q)}"><label class="check sm"><input type="checkbox" data-hz ${TB.hideZero ? 'checked' : ''}><span>${esc(t('hide_zero'))}</span></label>`;
+    const cell = (v, side) => side === 'dr' ? (v > 0.005 ? money(v) : '') : (v < -0.005 ? money(-v) : '');
+    main.innerHTML = A.filterBar(P, { extra }) + head(t('rep_tb'), periodSub()) + `
+      <div class="notice ${r.balanced ? 'good' : 'bad'}">${icon(r.balanced ? 'check' : 'alert')}<span>${esc(t(r.balanced ? 'balanced' : 'not_balanced'))}</span></div>
+      <div class="tablewrap mt"><table class="tbl tb"><thead><tr><th rowspan="2">${esc(t('code'))}</th><th rowspan="2">${esc(t('account'))}</th><th colspan="2" class="ctr">${esc(t('opening'))}</th><th colspan="2" class="ctr">${esc(t('movement'))}</th><th colspan="2" class="ctr">${esc(t('closing'))}</th></tr><tr><th class="money">${esc(t('debit'))}</th><th class="money">${esc(t('credit'))}</th><th class="money">${esc(t('debit'))}</th><th class="money">${esc(t('credit'))}</th><th class="money">${esc(t('debit'))}</th><th class="money">${esc(t('credit'))}</th></tr></thead>
+      <tbody>${r.rows.map(x => `<tr class="${x.group ? 'group' : ''} click" data-acc="${x.code}"><td class="code">${x.code}</td><td style="padding-inline-start:${10 + (TB.mode === 'tree' ? (x.level - 1) * 14 : 0)}px">${esc(L(x))}</td><td class="money">${cell(x.open, 'dr')}</td><td class="money">${cell(x.open, 'cr')}</td><td class="money">${money(x.dr, { blankZero: true })}</td><td class="money">${money(x.cr, { blankZero: true })}</td><td class="money">${cell(x.close, 'dr')}</td><td class="money">${cell(x.close, 'cr')}</td></tr>`).join('')}
+      <tr class="total"><td></td><td>${esc(t('totals'))}</td><td class="money">${money(r.totals.openDr)}</td><td class="money">${money(r.totals.openCr)}</td><td class="money">${money(r.totals.dr)}</td><td class="money">${money(r.totals.cr)}</td><td class="money">${money(r.totals.closeDr)}</td><td class="money">${money(r.totals.closeCr)}</td></tr></tbody></table></div>`;
+    A.bindFilter(main, P, () => R.tb(main));
+    $('[data-lv]', main).onchange = (e) => { TB.level = +e.target.value; R.tb(main); };
+    $('[data-mode]', main).onchange = (e) => { TB.mode = e.target.value; R.tb(main); };
+    $('[data-ty]', main).onchange = (e) => { TB.type = e.target.value; R.tb(main); };
+    $('[data-q]', main).onchange = (e) => { TB.q = e.target.value.trim(); R.tb(main); };
+    $('[data-hz]', main).onchange = (e) => { TB.hideZero = e.target.checked; R.tb(main); };
+    $$('[data-acc]', main).forEach(x => x.onclick = () => A.feat('rep_statement') && A.go('reports/statement/' + x.dataset.acc));
+    $('[data-csv]', main).onclick = () => U.download(`trial-balance-${from}-${to}.csv`, U.csv([[t('code'), t('account'), 'Opening Dr', 'Opening Cr', t('debit'), t('credit'), 'Closing Dr', 'Closing Cr'], ...r.rows.map(x => [x.code, L(x), x.open > 0 ? x.open : 0, x.open < 0 ? -x.open : 0, x.dr, x.cr, x.close > 0 ? x.close : 0, x.close < 0 ? -x.close : 0])]));
+  };
 
-  function trialBalance(main) {
-    const db = A().db; const [from, to] = periodRange(); const tb = S.trialBalance(db, from, to);
-    const rows = tb.rows;
-    main.innerHTML = periodBar() + title(main, t('trial_balance')) + `
-      <div class="notice ${tb.balanced ? 'good' : 'bad'}" style="margin-bottom:12px">${tb.balanced ? A().I.check : A().I.alert}<span>${esc(t(tb.balanced ? 'balanced' : 'not_balanced'))}</span></div>
-      <div class="tablewrap"><table class="tbl">${th([{ l: t('code') }, { l: t('account') }, { l: t('opening') + ' ' + t('debit'), r: 1 }, { l: t('opening') + ' ' + t('credit'), r: 1 }, { l: t('debit'), r: 1 }, { l: t('credit'), r: 1 }, { l: t('closing') + ' ' + t('debit'), r: 1 }, { l: t('closing') + ' ' + t('credit'), r: 1 }])}
-      <tbody>${rows.map(r => `<tr><td class="code">${r.code}</td><td>${esc(A().L(r))}</td><td class="money">${r.opening > 0 ? money(r.opening) : ''}</td><td class="money">${r.opening < 0 ? money(-r.opening) : ''}</td><td class="money">${r.debit ? money(r.debit) : ''}</td><td class="money">${r.credit ? money(r.credit) : ''}</td><td class="money">${r.closing > 0 ? money(r.closing) : ''}</td><td class="money">${r.closing < 0 ? money(-r.closing) : ''}</td></tr>`).join('')}
-      <tr class="total"><td></td><td>${esc(t('totals'))}</td><td class="money">${money(tb.totals.openingDr)}</td><td class="money">${money(tb.totals.openingCr)}</td><td class="money">${money(tb.totals.debit)}</td><td class="money">${money(tb.totals.credit)}</td><td class="money">${money(tb.totals.closingDr)}</td><td class="money">${money(tb.totals.closingCr)}</td></tr></tbody></table></div>`;
-    bindPeriod(main, () => trialBalance(main));
-    $('[data-csv]', main).addEventListener('click', () => A().download(`trial-balance-${from}-${to}.csv`, A().csv([[t('code'), t('account'), 'Opening Dr', 'Opening Cr', t('debit'), t('credit'), 'Closing Dr', 'Closing Cr'], ...rows.map(r => [r.code, A().L(r), r.opening > 0 ? r.opening : 0, r.opening < 0 ? -r.opening : 0, r.debit, r.credit, r.closing > 0 ? r.closing : 0, r.closing < 0 ? -r.closing : 0])])));
-  }
+  // ---------------------------------------------------------------- income statement
+  const IS = { level: 3 };
+  R.is = (main) => {
+    const d = db(); const [from, to] = A.periodRange(P); const r = S.incomeStatement(d, { from, to, branch: P.branch, level: IS.level });
+    const sec = (label, rows, total) => `<tr class="group"><td colspan="2">${esc(label)}</td><td class="money">${fmt(total)}</td></tr>${rows.map(x => `<tr class="${x.group ? 'sub' : ''} click" data-acc="${x.code}"><td class="code">${x.code}</td><td style="padding-inline-start:${10 + (x.level - 2) * 14}px">${esc(L(x))}</td><td class="money">${fmt(x.amount)}</td></tr>`).join('')}`;
+    const zakat = r.zakatOn && A.feat('zakat') && r.net > 0 ? S.r2(r.net * 0.025) : 0;
+    main.innerHTML = A.filterBar(P, { extra: `<select class="select fb" data-lv>${[2, 3, 4].map(l => `<option value="${l}" ${IS.level === l ? 'selected' : ''}>${esc(t('level'))} ${l}</option>`).join('')}</select>` }) + head(t('rep_is'), periodSub()) + `
+      <div class="tablewrap narrow"><table class="tbl">${U.th([{ l: t('code') }, { l: t('account') }, { l: t('sar'), r: 1 }])}<tbody>
+      ${sec(t('revenue'), r.revenue, r.totalRevenue)}${sec(t('cogs'), r.cogs, r.totalCogs)}
+      <tr class="total"><td colspan="2">${esc(t('gross_profit'))}</td><td class="money">${fmt(r.gross)}</td></tr>
+      ${sec(t('expenses'), r.expenses, r.totalExpenses)}
+      <tr class="total big"><td colspan="2">${esc(t(r.net >= 0 ? 'net_profit' : 'net_loss'))}</td><td class="money ${r.net >= 0 ? 'good-t' : 'bad-t'}">${fmt(r.net)}</td></tr>
+      ${zakat ? `<tr><td colspan="2">${esc(t('zakat_est'))}</td><td class="money">${fmt(-zakat)}</td></tr><tr class="total"><td colspan="2">${esc(t('after_zakat'))}</td><td class="money">${fmt(r.net - zakat)}</td></tr>` : ''}
+      </tbody></table></div>`;
+    A.bindFilter(main, P, () => R.is(main));
+    $('[data-lv]', main).onchange = (e) => { IS.level = +e.target.value; R.is(main); };
+    $$('[data-acc]', main).forEach(x => x.onclick = () => A.feat('rep_statement') && A.go('reports/statement/' + x.dataset.acc));
+    $('[data-csv]', main).onclick = () => U.download(`income-statement-${from}-${to}.csv`, U.csv([[t('code'), t('account'), t('sar')], ...[...r.revenue, ...r.cogs, ...r.expenses].map(x => [x.code, L(x), x.amount]), ['', t('net_profit'), r.net]]));
+  };
 
-  let stmtSubject = null;
-  function statement(main, args) {
-    const db = A().db;
-    if (args && args[0]) { const [type, id] = args[0].split(':'); stmtSubject = { type, id, code: id }; history.replaceState(null, '', '#/reports/statement'); }
-    const [from, to] = periodRange();
-    const opts = [{ v: '', l: t('pick_subject') }, ...db.suppliers.map(s => ({ v: 'supplier:' + s.id, l: `${t('supplier')}: ${A().L(s)}` })), ...db.accounts.map(a => ({ v: 'account:' + a.code, l: `${a.code} · ${A().L(a)}` }))];
-    const cur = stmtSubject ? `${stmtSubject.type}:${stmtSubject.id || stmtSubject.code}` : '';
-    let body = '';
-    let st = null, name = '';
-    if (stmtSubject) {
-      st = S.statement(db, stmtSubject, from, to);
-      name = stmtSubject.type === 'supplier' ? A().supName(stmtSubject.id) : A().acctName(stmtSubject.code);
-      body = `<div class="tablewrap"><table class="tbl">${th([{ l: t('date') }, { l: t('reference') }, { l: t('description') }, { l: t('debit'), r: 1 }, { l: t('credit'), r: 1 }, { l: t('running_balance'), r: 1 }])}<tbody>
-        <tr class="group"><td colspan="5">${esc(t('opening_balance'))}</td><td class="money">${money(st.opening)}</td></tr>
-        ${st.lines.map(l => `<tr><td class="num">${l.date}</td><td class="code">${l.no}</td><td class="memo">${esc(A().memoText(l))}</td><td class="money">${l.debit ? money(l.debit) : ''}</td><td class="money">${l.credit ? money(l.credit) : ''}</td><td class="money">${money(l.balance)}</td></tr>`).join('')}
-        <tr class="total"><td colspan="3">${esc(t('closing_balance'))}</td><td class="money">${money(st.totalDebit)}</td><td class="money">${money(st.totalCredit)}</td><td class="money">${money(st.closing)}</td></tr></tbody></table></div>
-        ${stmtSubject.type === 'supplier' ? `<p class="small muted" style="margin-top:8px">${esc(A().lang() === 'ar' ? 'الرصيد الموجب = مستحق للمورد' : 'Positive balance = owed to supplier')}</p>` : ''}`;
-    } else body = `<div class="empty">${esc(t('pick_subject'))}</div>`;
-    main.innerHTML = periodBar(`<select class="select" data-subject>${opts.map(o => `<option value="${o.v}" ${o.v === cur ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}</select>`) + title(main, t('statement_of_account'), stmtSubject ? `${name} · ${fmtDate(from)} → ${fmtDate(to)}` : null) + body;
-    bindPeriod(main, () => statement(main));
-    $('[data-subject]', main).addEventListener('change', (e) => { const v = e.target.value; if (!v) { stmtSubject = null; } else { const [type, id] = v.split(':'); stmtSubject = { type, id, code: id }; } statement(main); });
-    $('[data-csv]', main).addEventListener('click', () => { if (!st) return; A().download(`statement-${from}-${to}.csv`, A().csv([[t('date'), t('reference'), t('description'), t('debit'), t('credit'), t('running_balance')], [from, '', t('opening_balance'), '', '', st.opening], ...st.lines.map(l => [l.date, l.no, A().memoText(l), l.debit, l.credit, l.balance])])); });
-  }
+  // ---------------------------------------------------------------- balance sheet
+  const BS = { level: 3 };
+  R.bs = (main) => {
+    const d = db(); const asOf = P.asOf || S.todayISO(); const r = S.balanceSheet(d, { asOf, branch: P.branch, level: BS.level });
+    const rows = (list) => list.map(x => `<tr class="${x.group ? 'sub' : ''} click" data-acc="${x.code}"><td class="code">${x.code}</td><td style="padding-inline-start:${10 + (x.level - 2) * 14}px">${esc(L(x))}</td><td class="money">${fmt(x.amount)}</td></tr>`).join('');
+    main.innerHTML = A.filterBar(P, { asOf: true, extra: `<select class="select fb" data-lv>${[2, 3, 4].map(l => `<option value="${l}" ${BS.level === l ? 'selected' : ''}>${esc(t('level'))} ${l}</option>`).join('')}</select>` }) + head(t('rep_bs'), `${t('as_of')} ${fmtDate(asOf)}${P.branch ? ' · ' + A.branchName(P.branch) : ''}`) + `
+      <div class="notice ${r.balanced ? 'good' : 'bad'}">${icon(r.balanced ? 'check' : 'alert')}<span>${esc(t(r.balanced ? 'balanced' : 'not_balanced'))} — ${esc(t('total_assets'))} = ${esc(t('total_le'))}</span></div>
+      <div class="cols eq mt"><div class="tablewrap"><table class="tbl">${U.th([{ l: t('code') }, { l: t('t_asset') }, { l: t('sar'), r: 1 }])}<tbody>${rows(r.assets)}<tr class="total big"><td colspan="2">${esc(t('total_assets'))}</td><td class="money">${fmt(r.totalAssets)}</td></tr></tbody></table></div>
+      <div class="tablewrap"><table class="tbl">${U.th([{ l: t('code') }, { l: t('t_liability') + ' / ' + t('t_equity') }, { l: t('sar'), r: 1 }])}<tbody>${rows(r.liabilities)}<tr class="total"><td colspan="2">${esc(t('total_liabilities'))}</td><td class="money">${fmt(r.totalLiabilities)}</td></tr>
+        ${rows(r.equity)}<tr><td></td><td>${esc(t('current_profit'))}</td><td class="money">${fmt(r.currentProfit)}</td></tr><tr class="total"><td colspan="2">${esc(t('total_equity'))}</td><td class="money">${fmt(r.totalEquity + r.currentProfit)}</td></tr>
+        <tr class="total big"><td colspan="2">${esc(t('total_le'))}</td><td class="money">${fmt(r.totalLE)}</td></tr></tbody></table></div></div>`;
+    A.bindFilter(main, P, () => R.bs(main));
+    $('[data-lv]', main).onchange = (e) => { BS.level = +e.target.value; R.bs(main); };
+    $$('[data-acc]', main).forEach(x => x.onclick = () => A.feat('rep_statement') && A.go('reports/statement/' + x.dataset.acc));
+    $('[data-csv]', main).onclick = () => U.download(`balance-sheet-${asOf}.csv`, U.csv([[t('code'), t('account'), t('sar')], ...[...r.assets, ...r.liabilities, ...r.equity].map(x => [x.code, L(x), x.amount]), ['', t('current_profit'), r.currentProfit]]));
+  };
 
-  function pnl(main) {
-    const db = A().db; const [from, to] = periodRange(); const p = S.pnl(db, from, to);
-    const sec = (label, rows, total) => `<tr class="group"><td colspan="2">${esc(label)}</td><td class="money">${money(total)}</td></tr>${rows.map(r => `<tr><td class="code">${r.code}</td><td>${esc(A().L(r))}</td><td class="money">${money(r.amount)}</td></tr>`).join('')}`;
-    main.innerHTML = periodBar() + title(main, t('pnl')) + `<div class="tablewrap" style="max-width:720px"><table class="tbl">${th([{ l: t('code') }, { l: t('account') }, { l: t('sar'), r: 1 }])}<tbody>
-      ${sec(t('revenue'), p.revenue, p.totalRevenue)}${sec(t('cogs'), p.cogs, p.totalCogs)}
-      <tr class="total"><td colspan="2">${esc(t('gross_profit'))}</td><td class="money">${money(p.grossProfit)}</td></tr>
-      ${sec(t('expenses'), p.expenses, p.totalExpenses)}
-      <tr class="total"><td colspan="2">${esc(t(p.net >= 0 ? 'net_profit' : 'net_loss'))}</td><td class="money" style="color:${p.net >= 0 ? 'var(--good)' : 'var(--bad)'}">${money(Math.abs(p.net))}</td></tr></tbody></table></div>`;
-    bindPeriod(main, () => pnl(main));
-    $('[data-csv]', main).addEventListener('click', () => A().download(`pnl-${from}-${to}.csv`, A().csv([[t('account'), t('sar')], ...p.revenue.map(r => [A().L(r), r.amount]), ...p.cogs.map(r => [A().L(r), -r.amount]), ...p.expenses.map(r => [A().L(r), -r.amount]), [t('net_profit'), p.net]])));
-  }
+  // ---------------------------------------------------------------- cash flow
+  R.cf = (main) => {
+    const d = db(); const [from, to] = A.periodRange(P); const r = S.cashFlow(d, { from, to, branch: P.branch });
+    const sec = (title, rows, total) => `<tr class="group"><td>${esc(title)}</td><td></td></tr>${rows.map(x => `<tr><td style="padding-inline-start:24px">${esc(t(x.k))}</td><td class="money">${fmt(x.v)}</td></tr>`).join('')}<tr class="total"><td>${esc(t('total'))}</td><td class="money">${fmt(total)}</td></tr>`;
+    main.innerHTML = A.filterBar(P) + head(t('rep_cf'), periodSub()) + `
+      <div class="notice ${r.reconciles ? 'good' : 'bad'}">${icon(r.reconciles ? 'check' : 'alert')}<span>${esc(t('cf_reconciled'))}</span></div>
+      <div class="tablewrap narrow mt"><table class="tbl">${U.th([{ l: '' }, { l: t('sar'), r: 1 }])}<tbody>${sec(t('cf_operating'), r.op, r.operating)}${sec(t('cf_investing'), r.inv, r.investing)}${sec(t('cf_financing'), r.fin, r.financing)}
+      <tr class="total big"><td>${esc(t('cf_net'))}</td><td class="money">${fmt(r.net)}</td></tr><tr><td>${esc(t('cf_open'))}</td><td class="money">${fmt(r.openingCash)}</td></tr><tr class="total"><td>${esc(t('cf_close'))}</td><td class="money">${fmt(r.closingCash)}</td></tr></tbody></table></div>`;
+    A.bindFilter(main, P, () => R.cf(main));
+    $('[data-csv]', main).onclick = () => U.download(`cash-flow-${from}-${to}.csv`, U.csv([...r.op, ...r.inv, ...r.fin].map(x => [t(x.k), x.v]).concat([[t('cf_net'), r.net]])));
+  };
 
-  function vat(main) {
-    const db = A().db; const [from, to] = periodRange(); const v = S.vatReport(db, from, to);
-    main.innerHTML = periodBar() + title(main, t('vat_report')) + `<div class="card" style="max-width:560px">
-      <div class="kv"><span class="k">${esc(t('taxable_sales'))}</span><span class="v money">${money(v.taxableSales)}</span></div>
-      <div class="kv"><span class="k">${esc(t('output_vat'))} (15%)</span><span class="v money">${money(v.output)}</span></div>
-      <div class="kv"><span class="k">${esc(t('taxable_purchases'))}</span><span class="v money">${money(v.taxablePurchases)}</span></div>
-      <div class="kv"><span class="k">${esc(t('input_vat'))}</span><span class="v money">${money(v.input)}</span></div>
+  // ---------------------------------------------------------------- statement of account
+  const ST = { code: '', view: 'detail', type: '' };
+  R.statement = (main, args) => {
+    const d = db(); if (args[0]) { ST.code = args[0]; history.replaceState(null, '', '#/reports/statement'); }
+    const [from, to] = A.periodRange(P);
+    const opts = [{ v: '', l: t('pick_subject') }, { group: t('suppliers'), options: d.suppliers.map(s => ({ v: s.account, l: L({ ar: s.name, en: s.nameEn }) })) }, { group: t('customers'), options: d.customers.map(s => ({ v: s.account, l: L({ ar: s.name, en: s.nameEn }) })) }, ...U.accountOptions(d, { includeGroups: true })];
+    const extra = `<span class="grow-sel">${U.sel('subject', opts, ST.code, 'data-subject')}</span><select class="select fb" data-view><option value="detail" ${ST.view === 'detail' ? 'selected' : ''}>${esc(t('detail'))}</option><option value="monthly" ${ST.view === 'monthly' ? 'selected' : ''}>${esc(t('monthly'))}</option></select>
+      <select class="select fb" data-ty><option value="">${esc(t('entry_type'))}: ${esc(t('all'))}</option>${['sales', 'credit_sale', 'purchase', 'expense', 'receipt', 'payment', 'transfer', 'manual', 'opening', 'depreciation', 'eod', 'reversal'].map(x => `<option value="${x}" ${ST.type === x ? 'selected' : ''}>${esc(t('jt_' + x))}</option>`).join('')}</select>`;
+    let body = U.empty(t('pick_subject')), st = null;
+    if (ST.code && S.acc(d, ST.code)) {
+      st = S.statement(d, { code: ST.code, from, to, branch: P.branch, type: ST.type || undefined });
+      body = ST.view === 'detail' ? `<div class="tablewrap"><table class="tbl">${U.th([{ l: t('date') }, { l: t('entry_no') }, { l: t('entry_type') }, { l: t('description') }, { l: t('debit'), r: 1 }, { l: t('credit'), r: 1 }, { l: t('balance'), r: 1 }])}<tbody>
+        <tr class="group"><td colspan="6">${esc(t('opening_balance'))}</td><td class="money">${fmt(st.opening)}</td></tr>
+        ${st.lines.map(l => `<tr class="click" data-j="${l.id}"><td class="num">${l.date}</td><td class="code">${l.no}</td><td>${esc(t('jt_' + l.type))}</td><td class="memo">${esc(A.memoText(l.memo))}${l.note ? ' — ' + esc(l.note) : ''}</td><td class="money">${money(l.debit, { blankZero: true })}</td><td class="money">${money(l.credit, { blankZero: true })}</td><td class="money">${fmt(l.balance)}</td></tr>`).join('')}
+        <tr class="total"><td colspan="4">${esc(t('closing_balance'))}</td><td class="money">${money(st.totalDebit)}</td><td class="money">${money(st.totalCredit)}</td><td class="money">${fmt(st.closing)}</td></tr></tbody></table></div>`
+        : `<div class="tablewrap narrow"><table class="tbl">${U.th([{ l: t('month') }, { l: t('opening'), r: 1 }, { l: t('debit'), r: 1 }, { l: t('credit'), r: 1 }, { l: t('closing'), r: 1 }])}<tbody>${st.monthly.map(m => `<tr><td>${esc(fmtMonth(m.month))}</td><td class="money">${fmt(m.opening)}</td><td class="money">${money(m.debit)}</td><td class="money">${money(m.credit)}</td><td class="money strong">${fmt(m.closing)}</td></tr>`).join('')}
+        <tr class="total"><td>${esc(t('totals'))}</td><td class="money">${fmt(st.opening)}</td><td class="money">${money(st.totalDebit)}</td><td class="money">${money(st.totalCredit)}</td><td class="money">${fmt(st.closing)}</td></tr></tbody></table></div>`;
+    }
+    const sub = ST.code ? `${A.accName(ST.code)} · ${periodSub()}` : periodSub();
+    main.innerHTML = A.filterBar(P, { extra }) + head(t('rep_statement'), sub) + body;
+    A.bindFilter(main, P, () => R.statement(main, []));
+    $('[data-subject]', main).onchange = (e) => { ST.code = e.target.value; R.statement(main, []); };
+    $('[data-view]', main).onchange = (e) => { ST.view = e.target.value; R.statement(main, []); };
+    $('[data-ty]', main).onchange = (e) => { ST.type = e.target.value; R.statement(main, []); };
+    $$('[data-j]', main).forEach(x => x.onclick = () => Screens.entrySheet(x.dataset.j));
+    $('[data-csv]', main).onclick = () => { if (!st) return; U.download(`statement-${ST.code}-${from}-${to}.csv`, U.csv([[t('date'), t('entry_no'), t('description'), t('debit'), t('credit'), t('balance')], ['', '', t('opening_balance'), '', '', st.opening], ...st.lines.map(l => [l.date, l.no, A.memoText(l.memo), l.debit, l.credit, l.balance])])); };
+  };
+
+  // ---------------------------------------------------------------- party & cash balances
+  function balancesTable(main, title, kind) {
+    const d = db(); const [from, to] = A.periodRange(P);
+    const r = kind === 'cash' ? S.cashBalances(d, { from, to, branch: P.branch }) : S.partyBalances(d, kind, { from, to, branch: P.branch });
+    const name = (x) => kind === 'cash' ? `${x.code} · ${L(x)}` : L({ ar: x.name, en: x.nameEn });
+    const acct = (x) => kind === 'cash' ? x.code : x.account;
+    main.innerHTML = A.filterBar(P) + head(title, periodSub()) + `<div class="tablewrap"><table class="tbl">${U.th([{ l: kind === 'cash' ? t('account') : t('party_name') }, ...(kind !== 'cash' ? [{ l: t('vat_number') }] : []), { l: t('opening'), r: 1 }, { l: t('debit'), r: 1 }, { l: t('credit'), r: 1 }, { l: t('balance'), r: 1 }])}<tbody>
+      ${r.rows.filter(x => x.open || x.dr || x.cr || x.close).map(x => `<tr class="click" data-acc="${acct(x)}"><td class="strong">${esc(name(x))}</td>${kind !== 'cash' ? `<td class="num">${esc(x.vat || '')}</td>` : ''}<td class="money">${fmt(x.open)}</td><td class="money">${money(x.dr, { blankZero: true })}</td><td class="money">${money(x.cr, { blankZero: true })}</td><td class="money strong">${fmt(x.close)}</td></tr>`).join('')}
+      <tr class="total"><td ${kind !== 'cash' ? 'colspan="2"' : ''}>${esc(t('totals'))}</td><td class="money">${fmt(r.totals.open)}</td><td class="money">${money(r.totals.dr)}</td><td class="money">${money(r.totals.cr)}</td><td class="money">${fmt(r.totals.close)}</td></tr></tbody></table></div>`;
+    A.bindFilter(main, P, () => balancesTable(main, title, kind));
+    $$('[data-acc]', main).forEach(x => x.onclick = () => A.feat('rep_statement') && A.go('reports/statement/' + x.dataset.acc));
+    $('[data-csv]', main).onclick = () => U.download(`${kind}-balances-${from}-${to}.csv`, U.csv([[t('name'), t('opening'), t('debit'), t('credit'), t('balance')], ...r.rows.map(x => [name(x), x.open, x.dr, x.cr, x.close])]));
+  }
+  R.supbal = (main) => balancesTable(main, t('rep_supbal'), 'supplier');
+  R.custbal = (main) => balancesTable(main, t('rep_custbal'), 'customer');
+  R.cash = (main) => balancesTable(main, t('rep_cash'), 'cash');
+
+  // ---------------------------------------------------------------- VAT
+  R.vat = (main) => {
+    const d = db(); const [from, to] = A.periodRange(P); const v = S.vatReport(d, { from, to, branch: P.branch });
+    main.innerHTML = A.filterBar(P) + head(t('rep_vat'), periodSub()) + `<div class="card narrow">
+      <div class="kv"><span class="k">${esc(t('sales_base'))}</span><span class="v money">${money(v.salesBase)}</span></div><div class="kv"><span class="k">${esc(t('output_vat'))} (15%)</span><span class="v money">${money(v.output)}</span></div>
+      <div class="kv"><span class="k">${esc(t('purch_base'))}</span><span class="v money">${money(v.purchBase)}</span></div><div class="kv"><span class="k">${esc(t('input_vat'))}</span><span class="v money">${money(v.input)}</span></div>
       <div class="kv total"><span class="k">${esc(t(v.net >= 0 ? 'net_vat' : 'vat_refundable'))}</span><span class="v money">${money(Math.abs(v.net))}</span></div></div>`;
-    bindPeriod(main, () => vat(main));
-    $('[data-csv]', main).addEventListener('click', () => A().download(`vat-${from}-${to}.csv`, A().csv([[t('taxable_sales'), v.taxableSales], [t('output_vat'), v.output], [t('taxable_purchases'), v.taxablePurchases], [t('input_vat'), v.input], [t('net_vat'), v.net]])));
-  }
+    A.bindFilter(main, P, () => R.vat(main));
+    $('[data-csv]', main).onclick = () => U.download(`vat-${from}-${to}.csv`, U.csv([[t('sales_base'), v.salesBase], [t('output_vat'), v.output], [t('purch_base'), v.purchBase], [t('input_vat'), v.input], [t('net_vat'), v.net]]));
+  };
 
-  function sales(main) {
-    const db = A().db; const [from, to] = periodRange(); const r = S.salesReport(db, from, to);
+  // ---------------------------------------------------------------- sales
+  R.sales = (main) => {
+    const d = db(); const [from, to] = A.periodRange(P); const r = S.salesReport(d, { from, to, branch: P.branch });
     const days = Object.keys(r.byDay).sort(); const max = Math.max(1, ...Object.values(r.byDay));
-    main.innerHTML = periodBar() + title(main, t('sales_report')) + `
-      <div class="tiles" style="margin-bottom:12px"><div class="tile"><span class="k">${esc(t('total'))}</span><span class="v money">${money(r.total, { whole: true })}</span></div><div class="tile"><span class="k">${esc(t('invoices'))}</span><span class="v num">${r.n}</span></div><div class="tile"><span class="k">${esc(A().lang() === 'ar' ? 'متوسط الفاتورة' : 'Average ticket')}</span><span class="v money">${money(r.avg)}</span></div><div class="tile"><span class="k">${esc(A().lang() === 'ar' ? 'أيام' : 'Days')}</span><span class="v num">${days.length}</span></div></div>
-      <div class="card" style="margin-bottom:12px"><div class="spark" style="height:90px;margin-top:0">${days.map(d => `<span style="height:${Math.max(3, r.byDay[d] / max * 100)}%" title="${d}: ${money(r.byDay[d])}"></span>`).join('')}</div></div>
-      <div class="grid2" style="align-items:start">
-        <div class="card"><h3 style="font-size:14px;margin-bottom:6px">${esc(t('by_branch'))}</h3>${db.branches.map(b => `<div class="kv"><span class="k">${esc(A().L(b))}</span><span class="v money">${money(r.byBranch[b.id] || 0)}</span></div>`).join('')}</div>
-        <div class="card"><h3 style="font-size:14px;margin-bottom:6px">${esc(t('by_payment'))}</h3>${['cash', 'mada', 'visa', 'tabby', 'transfer'].filter(m => r.byMethod[m]).map(m => `<div class="kv"><span class="k">${esc(A().methodName(m))}</span><span class="v money">${money(r.byMethod[m])}</span></div>`).join('')}</div></div>
-      <div class="tablewrap" style="margin-top:12px;max-width:720px"><table class="tbl">${th([{ l: t('date') }, ...db.branches.map(b => ({ l: A().L(b), r: 1 })), { l: t('total'), r: 1 }])}<tbody>${days.map(d => { const bb = db.branches.map(b => db.salesInvoices.filter(i => i.date === d && i.branch === b.id).reduce((a, i) => a + i.total, 0)); return `<tr><td class="num">${d}</td>${bb.map(v => `<td class="money">${money(v)}</td>`).join('')}<td class="money strong">${money(r.byDay[d])}</td></tr>`; }).join('')}</tbody></table></div>`;
-    bindPeriod(main, () => sales(main));
-    $('[data-csv]', main).addEventListener('click', () => A().download(`sales-${from}-${to}.csv`, A().csv([[t('date'), t('total')], ...days.map(d => [d, r.byDay[d]])])));
-  }
+    main.innerHTML = A.filterBar(P) + head(t('rep_sales'), periodSub()) + `
+      <div class="tiles"><div class="tile"><span class="k">${esc(t('total'))}</span><span class="v money">${money(r.total, { whole: true })}</span></div><div class="tile"><span class="k">${esc(t('invoices'))}</span><span class="v num">${r.n}</span></div><div class="tile"><span class="k">${esc(t('avg_ticket'))}</span><span class="v money">${money(r.avg)}</span></div><div class="tile"><span class="k">${esc(t('credit_sales'))}</span><span class="v money">${money(r.credit, { whole: true })}</span></div></div>
+      <div class="card mt"><div class="spark tall">${days.map(x => `<span style="height:${Math.max(3, r.byDay[x] / max * 100)}%" title="${x}: ${money(r.byDay[x])}"></span>`).join('')}</div></div>
+      <div class="cols eq mt"><div class="card"><h3 class="h3 mt0">${esc(t('by_branch'))}</h3>${d.branches.map(b => `<div class="kv"><span class="k">${esc(L(b))}</span><span class="v money">${money(r.byBranch[b.id] || 0)}</span></div>`).join('')}</div>
+      <div class="card"><h3 class="h3 mt0">${esc(t('by_payment'))}</h3>${Object.entries(r.byMethod).sort((a, b) => b[1] - a[1]).map(([m, v]) => `<div class="kv"><span class="k">${esc(t('m_' + m))}</span><span class="v money">${money(v)}</span></div>`).join('')}</div></div>
+      <div class="tablewrap mt narrow"><table class="tbl compact">${U.th([{ l: t('date') }, ...d.branches.map(b => ({ l: L(b), r: 1 })), { l: t('total'), r: 1 }])}<tbody>${days.map(x => `<tr><td class="num">${x}</td>${d.branches.map(b => `<td class="money">${money(d.salesInvoices.filter(i => i.date === x && i.branch === b.id).reduce((a, i) => a + i.total, 0))}</td>`).join('')}<td class="money strong">${money(r.byDay[x])}</td></tr>`).join('')}</tbody></table></div>`;
+    A.bindFilter(main, P, () => R.sales(main));
+    $('[data-csv]', main).onclick = () => U.download(`sales-${from}-${to}.csv`, U.csv([[t('date'), t('total')], ...days.map(x => [x, r.byDay[x]])]));
+  };
 
-  function aged(main) {
-    const db = A().db; const a = S.agedPayables(db); const to = S.todayISO();
-    main.innerHTML = periodBar() + title(main, t('aged_payables'), `${fmtDate(to)}`) + `<div class="tablewrap"><table class="tbl">${th([{ l: t('supplier') }, { l: t('current'), r: 1 }, { l: t('days_1_30'), r: 1 }, { l: t('days_31_60'), r: 1 }, { l: t('days_61_90'), r: 1 }, { l: t('days_90p'), r: 1 }, { l: t('total'), r: 1 }])}<tbody>
-      ${a.rows.map(r => `<tr><td>${esc(A().supName(r.supplierId))}</td><td class="money">${r.current ? money(r.current) : ''}</td><td class="money">${r.d30 ? money(r.d30) : ''}</td><td class="money">${r.d60 ? money(r.d60) : ''}</td><td class="money">${r.d90 ? money(r.d90) : ''}</td><td class="money">${r.d90p ? money(r.d90p) : ''}</td><td class="money strong">${money(r.total)}</td></tr>`).join('')}
-      <tr class="total"><td>${esc(t('totals'))}</td><td class="money">${money(a.totals.current)}</td><td class="money">${money(a.totals.d30)}</td><td class="money">${money(a.totals.d60)}</td><td class="money">${money(a.totals.d90)}</td><td class="money">${money(a.totals.d90p)}</td><td class="money">${money(a.totals.total)}</td></tr></tbody></table></div>`;
-    bindPeriod(main, () => aged(main));
-    $('[data-csv]', main).addEventListener('click', () => A().download(`aged-payables-${to}.csv`, A().csv([[t('supplier'), t('current'), t('days_1_30'), t('days_31_60'), t('days_61_90'), t('days_90p'), t('total')], ...a.rows.map(r => [A().supName(r.supplierId), r.current, r.d30, r.d60, r.d90, r.d90p, r.total])])));
-  }
+  // ---------------------------------------------------------------- expenses
+  R.exp = (main) => {
+    const d = db(); const [from, to] = A.periodRange(P); const r = S.expensesReport(d, { from, to, branch: P.branch });
+    main.innerHTML = A.filterBar(P) + head(t('rep_exp'), periodSub()) + `<div class="cols eq">
+      <div class="tablewrap"><table class="tbl">${U.th([{ l: t('ledger_expenses') }, { l: t('sar'), r: 1 }])}<tbody>${r.ledger.map(x => `<tr class="click" data-acc="${x.code}"><td><span class="code">${x.code}</span> ${esc(L(x))}</td><td class="money">${money(x.amount)}</td></tr>`).join('')}<tr class="total"><td>${esc(t('total'))}</td><td class="money">${money(r.ledgerTotal)}</td></tr></tbody></table></div>
+      <div class="tablewrap"><table class="tbl">${U.th([{ l: t('documents') + ' — ' + t('by_account') }, { l: t('sar'), r: 1 }])}<tbody>${Object.entries(r.byAccount).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<tr><td>${esc(A.accName(c))}</td><td class="money">${money(v)}</td></tr>`).join('')}<tr><td>${esc(t('vat'))}</td><td class="money">${money(r.vat)}</td></tr><tr class="total"><td>${esc(t('total_with_vat'))}</td><td class="money">${money(r.total)}</td></tr></tbody></table></div></div>`;
+    A.bindFilter(main, P, () => R.exp(main));
+    $$('[data-acc]', main).forEach(x => x.onclick = () => A.feat('rep_statement') && A.go('reports/statement/' + x.dataset.acc));
+    $('[data-csv]', main).onclick = () => U.download(`expenses-${from}-${to}.csv`, U.csv([[t('code'), t('account'), t('sar')], ...r.ledger.map(x => [x.code, L(x), x.amount])]));
+  };
 
-  function journal(main) {
-    const db = A().db; const [from, to] = periodRange();
-    const list = db.journal.filter(j => j.date >= from && j.date <= to).sort((a, b) => b.date.localeCompare(a.date) || b.no.localeCompare(a.no)).slice(0, 300);
-    main.innerHTML = periodBar() + title(main, t('general_journal')) + `<div class="tablewrap"><table class="tbl">${th([{ l: t('date') }, { l: t('reference') }, { l: t('description') }, { l: t('account') }, { l: t('debit'), r: 1 }, { l: t('credit'), r: 1 }])}<tbody>
-      ${list.map(j => j.lines.map((l, i) => `<tr>${i === 0 ? `<td class="num" rowspan="${j.lines.length}">${j.date}</td><td class="code" rowspan="${j.lines.length}">${j.no}</td><td class="memo" rowspan="${j.lines.length}">${esc(A().memoText(j))}</td>` : ''}<td style="${l.credit ? 'padding-inline-start:28px' : ''}">${esc(A().acctName(l.account))}${l.branch ? ` <span class="small muted">${esc(A().branchName(l.branch))}</span>` : ''}</td><td class="money">${l.debit ? money(l.debit) : ''}</td><td class="money">${l.credit ? money(l.credit) : ''}</td></tr>`).join('')).join('')}</tbody></table></div>`;
-    bindPeriod(main, () => journal(main));
-    $('[data-csv]', main).addEventListener('click', () => A().download(`journal-${from}-${to}.csv`, A().csv([[t('date'), t('reference'), t('description'), t('account'), t('debit'), t('credit')], ...list.flatMap(j => j.lines.map(l => [j.date, j.no, A().memoText(j), A().acctName(l.account), l.debit, l.credit]))])));
-  }
-
-  return { screen };
+  // ---------------------------------------------------------------- aged payables
+  R.aged = (main) => {
+    const d = db(); const asOf = P.asOf || S.todayISO(); const a = S.agedPayables(d, asOf);
+    main.innerHTML = A.filterBar(P, { asOf: true, branch: false }) + head(t('rep_aged'), `${t('as_of')} ${fmtDate(asOf)}`) + `<div class="tablewrap"><table class="tbl">${U.th([{ l: t('supplier') }, { l: t('current_b'), r: 1 }, { l: t('d30'), r: 1 }, { l: t('d60'), r: 1 }, { l: t('d90'), r: 1 }, { l: t('d90p'), r: 1 }, { l: t('total'), r: 1 }])}<tbody>
+      ${a.rows.map(x => `<tr><td class="strong">${esc(A.supName(x.supplierId))}</td>${['current', 'd30', 'd60', 'd90', 'd90p'].map(k => `<td class="money ${k !== 'current' && x[k] ? 'bad-t' : ''}">${money(x[k], { blankZero: true })}</td>`).join('')}<td class="money strong">${money(x.total)}</td></tr>`).join('')}
+      <tr class="total"><td>${esc(t('totals'))}</td>${['current', 'd30', 'd60', 'd90', 'd90p', 'total'].map(k => `<td class="money">${money(a.totals[k])}</td>`).join('')}</tr></tbody></table></div>`;
+    A.bindFilter(main, P, () => R.aged(main));
+    $('[data-csv]', main).onclick = () => U.download(`aged-payables-${asOf}.csv`, U.csv([[t('supplier'), t('current_b'), t('d30'), t('d60'), t('d90'), t('d90p'), t('total')], ...a.rows.map(x => [A.supName(x.supplierId), x.current, x.d30, x.d60, x.d90, x.d90p, x.total])]));
+  };
 })();
