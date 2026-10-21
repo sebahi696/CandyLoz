@@ -19,10 +19,11 @@
     const body = $('#salesbody', main);
     if (salesMode === 'import') {
       body.innerHTML = `<div class="card"><p class="muted mt0">${esc(t('import_hint'))}</p>
-        <label class="dropzone" for="posfile">${icon('upload')}<p>${esc(t('choose_file'))}</p><small>CSV · XLSX</small></label><input id="posfile" type="file" accept=".csv,.xlsx,.xls,text/csv" class="sr">
+        <div class="notice info">${icon('file')}<span>${esc(t('sky_supported'))}</span></div>
+        <label class="dropzone mt" for="posfile">${icon('upload')}<p>${esc(t('choose_file'))}</p><small>rptSalesVatTax.xlsx · CSV</small></label><input id="posfile" type="file" accept=".csv,.xlsx,.xls,text/csv" class="sr">
         <div class="btnrow"><button class="btn secondary sm" data-sample>${icon('download')}${esc(t('download_sample'))}</button></div></div>`;
       $('#posfile', body).addEventListener('change', async (e) => { const f = e.target.files[0]; if (f) await importFlow(f); e.target.value = ''; });
-      $('[data-sample]', body).addEventListener('click', () => { const b = d.branches[2] || d.branches[0]; U.download(`skysystem_sales_${b.code}_${today()}.csv`, PosImport.sampleCSV(b.code, today())); });
+      $('[data-sample]', body).addEventListener('click', async () => { const last = d.salesInvoices.filter(i => /^S\d+$/.test(i.no)).reduce((m, i) => Math.max(m, +i.no.slice(1)), 70000); await PosImport.sampleSkyXlsx(today(), last + 1); });
     } else {
       const methods = d.paymentMethods.filter(p => p.active);
       body.innerHTML = `<form class="card" id="manualform"><p class="muted mt0">${esc(t('manual_sales_hint'))}</p>
@@ -44,6 +45,7 @@
     const d = db(); let rows;
     try { rows = await PosImport.parseFile(file); } catch (e) { return U.toast(t('read_failed'), 'bad'); }
     if (!rows || rows.length < 2) return U.toast(t('nothing_to_post'));
+    const sky = PosImport.detectSky(rows); if (sky) return skyImport(file, rows, sky);
     const headers = rows[0].map(h => String(h ?? '')); const map = PosImport.autoMap(headers);
     const fields = ['date', 'branch', 'invoice', 'subtotal', 'vat', 'total', 'method'];
     const hopts = [{ v: '', l: t('ignore') }, ...headers.map((h, i) => ({ v: i, l: h || `#${i + 1}` }))];
@@ -66,11 +68,44 @@
     } });
   }
 
+  let lastSkyBranch = null;
+  function skyImport(file, rows, info) {
+    const d = db(); const br0 = lastSkyBranch || A.defaultBranch();
+    const methodOpts = [{ v: 'pos', l: t('sky_method_pos') }, ...d.paymentMethods.filter(p => p.active).map(p => ({ v: p.key, l: t('sky_method_all') + ' ' + L(p) }))];
+    U.openSheet({ title: t('import_from_pos'), xwide: true, body: `<form id="skyf">
+      <div class="notice good">${icon('check')}<span><b>${esc(t('sky_detected'))}</b> — ${esc(info.title)}${info.periodFrom ? ` · ${esc(t('period'))}: <span class="num">${info.periodFrom} → ${info.periodTo}</span>` : ''}<br><span class="small">${esc(file.name)}</span></span></div>
+      <div class="grid2 mt">${U.field(t('sky_branch'), U.sel('branch', A.branchOptions(), br0), t('sky_branch_hint'))}${U.field(t('sky_method'), U.sel('method', methodOpts, 'pos'), t('sky_method_hint'))}</div>
+      <div id="skyprev"></div><button class="btn primary" type="submit" id="skypost">${esc(t('post_sales'))}</button></form>`, onMount: (sh) => {
+      const f = $('#skyf', sh); let parsed = null;
+      const build = () => { const x = U.formData(f); parsed = PosImport.parseSky(rows, info, { branch: x.branch, method: x.method }); return parsed; };
+      const preview = () => {
+        const r = build(); const key = (i) => i.branch + '|' + i.no; const ex = new Set(d.salesInvoices.map(key));
+        const fresh = r.invoices.filter(i => !ex.has(key(i))); const dup = r.invoices.length - fresh.length;
+        const byDay = {}; for (const i of fresh) { const x = (byDay[i.date] ||= { n: 0, sub: 0, vat: 0, total: 0, disc: 0, closed: S.isClosed(d, i.date, i.branch) }); x.n++; x.sub += i.subtotal; x.vat += i.vat; x.total += i.total; x.disc += i.discount; }
+        const tot = fresh.reduce((s2, i) => ({ sub: s2.sub + i.subtotal, vat: s2.vat + i.vat, total: s2.total + i.total }), { sub: 0, vat: 0, total: 0 });
+        const days = Object.keys(byDay).sort(); const lock = d.settings.lockDate; const locked = days.filter(x => lock && x <= lock);
+        $('#skyprev', f).innerHTML = `
+          ${r.check && !r.check.ok ? `<div class="notice warn mt">${icon('alert')}<span>${esc(t('sky_total_mismatch'))}: ${esc(t('sky_file_total'))} <b class="money">${money(r.check.fileTotal)}</b> · ${esc(t('sky_rows_total'))} <b class="money">${money(r.check.rowsTotal)}</b></span></div>` : r.check ? `<div class="notice good mt">${icon('check')}<span>${esc(t('sky_total_ok'))} <b class="money">${money(r.check.fileTotal)}</b></span></div>` : ''}
+          ${dup ? `<div class="notice info mt">${icon('info')}<span>${dup} ${esc(t('duplicates_skipped'))}</span></div>` : ''}
+          ${r.errors.length ? `<div class="notice bad mt">${icon('alert')}<span>${r.errors.length} ${esc(t('sky_bad_rows'))}: ${r.errors.slice(0, 6).map(e => e.row).join(', ')}</span></div>` : ''}
+          ${locked.length ? `<div class="notice bad mt">${icon('lock')}<span>${esc(t('e_period_locked'))} ${esc(lock)}</span></div>` : ''}
+          <div class="tiles mt"><div class="tile"><span class="k">${esc(t('invoices'))}</span><span class="v num">${fresh.length}</span></div><div class="tile"><span class="k">${esc(t('days'))}</span><span class="v num">${days.length}</span></div><div class="tile"><span class="k">${esc(t('subtotal'))}</span><span class="v money">${money(tot.sub)}</span></div><div class="tile"><span class="k">${esc(t('total'))} (${esc(t('incl_vat'))})</span><span class="v money">${money(tot.total)}</span></div></div>
+          ${days.length ? `<div class="tablewrap mt"><table class="tbl compact">${U.th([{ l: t('date') }, { l: t('invoices'), r: 1 }, { l: t('subtotal'), r: 1 }, { l: t('discount'), r: 1 }, { l: t('vat'), r: 1 }, { l: t('total'), r: 1 }, { l: t('nav_eod') }])}<tbody>${days.map(x => `<tr><td class="num">${x} · ${esc(weekday(x))}</td><td class="money">${byDay[x].n}</td><td class="money">${money(byDay[x].sub)}</td><td class="money">${money(byDay[x].disc, { blankZero: true })}</td><td class="money">${money(byDay[x].vat)}</td><td class="money strong">${money(byDay[x].total)}</td><td>${byDay[x].closed ? U.pill(t('already_closed'), 'warn') : U.pill(t('status_open'), 'neutral')}</td></tr>`).join('')}</tbody></table></div>
+          <div class="tablewrap mt"><table class="tbl compact">${U.th([{ l: t('col_invoice') }, { l: t('col_date') }, { l: t('sky_time') }, { l: t('subtotal'), r: 1 }, { l: t('vat'), r: 1 }, { l: t('col_total'), r: 1 }])}<tbody>${fresh.slice(0, 6).map(i => `<tr><td class="code">${esc(i.no)}</td><td class="num">${i.date}</td><td class="num">${esc(i.time || '')}</td><td class="money">${money(i.subtotal)}</td><td class="money">${money(i.vat)}</td><td class="money">${money(i.total)}</td></tr>`).join('')}</tbody></table></div>` : U.empty(t('nothing_to_post'))}`;
+        $('#skypost', f).disabled = !fresh.length || locked.length > 0;
+      };
+      f.addEventListener('change', preview); preview();
+      f.addEventListener('submit', (e) => { e.preventDefault(); const x = U.formData(f); lastSkyBranch = x.branch;
+        try { const r = S.postSalesBatch(d, build().invoices, { source: 'skysystem_xlsx', file: file.name, user: A.user().id }); U.closeSheet(); A.commit(r.posted ? t('posted_sales', { n: r.posted }) : t('nothing_to_post')); } catch (er) { U.fail(er); } });
+    } });
+  }
+
   // ================================================================ END OF DAY
   let eodBranch = null, eodDate = null;
   Screens.eod = (main) => {
     const d = db(); eodBranch = eodBranch || A.defaultBranch(); eodDate = eodDate || today();
-    const ds = S.daySales(d, eodDate, eodBranch); const expected = S.expectedCash(d, eodDate, eodBranch);
+    const ds = S.daySales(d, eodDate, eodBranch); const expected = S.expectedCash(d, eodDate, eodBranch); const pos = S.posPending(d, eodDate, eodBranch);
+    const methods = d.paymentMethods.filter(p => p.active);
     const closed = d.eod.find(e => e.date === eodDate && e.branch === eodBranch && !e.reopened);
     const open = A.openDays(); const recent = d.eod.filter(e => !e.reopened).sort((a, b) => b.date.localeCompare(a.date) || b.at.localeCompare(a.at)).slice(0, 10);
     const diffPill = (x) => Math.abs(x) < 0.005 ? U.pill(t('exact'), 'good') : `<span class="pill ${x > 0 ? 'warn' : 'bad'}"><span class="money">${x > 0 ? '+' : '−'}${money(Math.abs(x))}</span> ${esc(t(x > 0 ? 'over' : 'short'))}</span>`;
@@ -79,10 +114,18 @@
       <div class="card"><div class="grid2">${U.field(t('date'), U.dateInput('date', eodDate))}<div class="field"><label>${esc(t('invoices'))}</label><div class="input readout"><span class="num">${ds.n}</span><span class="money strong">${money(ds.total)}</span></div></div></div>
         ${Object.entries(ds.byMethod).map(([m, v]) => `<div class="kv"><span class="k">${esc(t('m_' + m))}</span><span class="v money">${money(v)}</span></div>`).join('')}</div>
       ${closed ? `<div class="card mt"><div class="notice good">${icon('check')}<span>${esc(t('already_closed'))} · ${esc(t('closed_by'))} ${esc(A.userName(d.users.find(u => u.id === closed.user)))}</span></div>
-          <div class="kv"><span class="k">${esc(t('expected_cash'))}</span><span class="v money">${money(closed.expected)}</span></div><div class="kv"><span class="k">${esc(t('counted_cash'))}</span><span class="v money">${money(closed.counted)}</span></div>
+          ${closed.methods ? Object.entries(closed.methods).map(([k, v]) => `<div class="kv"><span class="k">${esc(t('m_' + k))}</span><span class="v money">${money(v)}</span></div>`).join('') : ''}
+          <div class="kv"><span class="k">${esc(t(closed.mode === 'settle' ? 'sky_pos_total' : 'expected_cash'))}</span><span class="v money">${money(closed.expected)}</span></div><div class="kv"><span class="k">${esc(t(closed.mode === 'settle' ? 'sky_settled_total' : 'counted_cash'))}</span><span class="v money">${money(closed.counted)}</span></div>
           <div class="kv total"><span class="k">${esc(t('difference'))}</span><span class="v">${diffPill(closed.diff)}</span></div>${closed.notes ? `<p class="small muted">${esc(closed.notes)}</p>` : ''}
           ${A.can('eod_reopen') ? `<button class="btn secondary mt" data-reopen>${esc(t('reopen'))}</button>` : ''}</div>`
         : ds.n === 0 ? `<div class="empty mt">${esc(t('no_sales_for_day'))}</div>`
+          : pos > 0 ? `<form class="card mt" id="settleform"><p class="hint mt0">${esc(t('sky_settle_hint'))}</p>
+          <div class="kv total"><span class="k">${esc(t('sky_pos_total'))}</span><span class="v money">${money(pos)}</span></div>
+          <div class="grid2">${methods.map(m => U.field(L(m), U.moneyInput('pm_' + m.key, '', m.key === 'cash' ? 'style="font-size:20px"' : ''))).join('')}</div>
+          <div class="kv"><span class="k">${esc(t('sky_settled_total'))}</span><span class="v money" id="stot">0.00</span></div>
+          <div class="kv total"><span class="k">${esc(t('difference'))}</span><span class="v" id="sdiff">${diffPill(-pos)}</span></div>
+          ${U.field(t('notes'), '<textarea class="input" name="notes" rows="2"></textarea>')}
+          <button class="btn primary" type="submit">${esc(t('close_day'))} · ${esc(A.branchName(eodBranch))} · ${esc(fmtDateShort(eodDate))}</button></form>`
           : `<form class="card mt" id="eodform"><div class="kv total"><span class="k">${esc(t('expected_cash'))}</span><span class="v money">${money(expected)}</span></div>
           ${U.field(t('counted_cash'), U.moneyInput('counted', '', 'required style="font-size:24px;height:56px"'))}
           <div class="kv total"><span class="k">${esc(t('difference'))}</span><span class="v" id="diff">${diffPill(0)}</span></div>
@@ -97,6 +140,11 @@
     $$('[data-open]', main).forEach(b => b.addEventListener('click', () => { const [x, y] = b.dataset.open.split('|'); eodDate = x; eodBranch = y; Screens.eod(main); window.scrollTo(0, 0); }));
     const f = $('#eodform', main);
     if (f) { $('[name=counted]', f).addEventListener('input', (e) => { $('#diff', f).innerHTML = diffPill(S.r2((parseFloat(e.target.value) || 0) - expected)); }); f.addEventListener('submit', (e) => { e.preventDefault(); const x = U.formData(f); try { S.closeDay(d, { date: eodDate, branch: eodBranch, counted: parseFloat(x.counted) || 0, notes: x.notes, user: A.user().id }); A.commit(t('day_closed')); } catch (er) { U.fail(er); } }); }
+    const sf = $('#settleform', main);
+    if (sf) { const sumOf = () => { const x = U.formData(sf); return S.r2(methods.reduce((a, m) => a + (parseFloat(x['pm_' + m.key]) || 0), 0)); };
+      sf.addEventListener('input', () => { const sm = sumOf(); $('#stot', sf).textContent = money(sm); $('#sdiff', sf).innerHTML = diffPill(S.r2(sm - pos)); });
+      sf.addEventListener('submit', (e) => { e.preventDefault(); const x = U.formData(sf); const ms = {}; for (const m of methods) { const v = parseFloat(x['pm_' + m.key]) || 0; if (v) ms[m.key] = v; } if (!Object.keys(ms).length) return U.toast(t('e_amount'), 'bad');
+        try { S.closeDay(d, { date: eodDate, branch: eodBranch, methods: ms, notes: x.notes, user: A.user().id }); A.commit(t('day_closed')); } catch (er) { U.fail(er); } }); }
     const ro = $('[data-reopen]', main); if (ro) ro.addEventListener('click', () => { try { S.reopenDay(d, closed.id, A.user().id); A.commit(t('day_reopened')); } catch (er) { U.fail(er); } });
   };
 

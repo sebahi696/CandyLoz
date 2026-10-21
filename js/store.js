@@ -98,6 +98,7 @@
     ['11010304', 'مستحقات تمارا', 'Tamara receivable'],
     ['11010305', 'مستحقات مدفوعات سلة', 'Salla Payments receivable'],
     ['110104', 'العهد النقدية', 'Petty cash', { g: 1 }],
+    ['110106', 'مقبوضات نقاط البيع تحت التسوية', 'POS receipts pending settlement'],
     ['11010401', 'عهدة المشتريات', 'Purchasing petty cash'],
     ['1102', 'الذمم المدينة', 'Receivables', { g: 1 }],
     ['110201', 'العملاء', 'Customers', { g: 1, s: 1 }],
@@ -193,7 +194,7 @@
   const TYPE_BY_ROOT = { 1: 'asset', 2: 'liability', 3: 'equity', 4: 'revenue', 5: 'cogs', 6: 'expense' };
   const natureOf = (type) => (type === 'asset' || type === 'cogs' || type === 'expense') ? 'debit' : 'credit';
   const DEFAULT_SYS = {
-    bank: '11010201', vatIn: '110501', vatOut: '210301', vatPayable: '210302', apGroup: '2101', arGroup: '110201',
+    bank: '11010201', posClearing: '110106', salesDiscounts: '4105', vatIn: '110501', vatOut: '210301', vatPayable: '210302', apGroup: '2101', arGroup: '110201',
     cashGroup: '110101', salesGroup: '4101', salesOnline: '4102', salesCorporate: '4103', salesReturns: '4104',
     purchases: '5101', freight: '5102', cashOverShort: '6301', depExpense: '6208', gatewayFees: '6101', bankCharges: '6302',
     retained: '33', capital: '31', zakatExpense: '6304', zakatPayable: '2104', cashByBranch: {}, salesByBranch: {},
@@ -260,7 +261,7 @@
   }
   const branchCash = (db, b) => db.sys.cashByBranch[b] || db.sys.cashByBranch[Object.keys(db.sys.cashByBranch)[0]];
   const branchSales = (db, b) => db.sys.salesByBranch[b] || db.sys.salesByBranch[Object.keys(db.sys.salesByBranch)[0]];
-  function methodAccount(db, key, branch) { const pm = db.paymentMethods.find(p => p.key === key) || db.paymentMethods[0]; return pm.account === '@branch_cash' ? branchCash(db, branch) : pm.account; }
+  function methodAccount(db, key, branch) { if (key === 'pos') return db.sys.posClearing || '110106'; const pm = db.paymentMethods.find(p => p.key === key) || db.paymentMethods[0]; return pm.account === '@branch_cash' ? branchCash(db, branch) : pm.account; }
 
   // ---------------------------------------------------------------- journal
   function postEntry(db, e) {
@@ -283,20 +284,22 @@
 
   // ---------------------------------------------------------------- sales
   function postSalesBatch(db, invoices, meta = {}) {
-    const existing = new Set(db.salesInvoices.map(i => i.no));
-    const fresh = invoices.filter(i => !existing.has(i.no));
+    const key = (i) => i.branch + '|' + i.no;
+    const existing = new Set(db.salesInvoices.map(key)); const seen = new Set();
+    const fresh = invoices.filter(i => { const k = key(i); if (existing.has(k) || seen.has(k)) return false; seen.add(k); return true; });
     if (!fresh.length) return { posted: 0, skipped: invoices.length };
     const imp = { id: uid(), at: meta.at || new Date().toISOString(), file: meta.file || null, source: meta.source || 'manual', user: meta.user || null, count: fresh.length, total: r2(fresh.reduce((a, i) => a + i.total, 0)), dates: [...new Set(fresh.map(i => i.date))].sort() };
     db.imports.push(imp);
     for (const i of fresh) db.salesInvoices.push({ ...i, importId: imp.id });
     const groups = {};
-    for (const i of fresh) { const k = `${i.date}|${i.branch}|${i.method}`; const g = (groups[k] ||= { date: i.date, branch: i.branch, method: i.method, subtotal: 0, vat: 0, total: 0, n: 0 }); g.subtotal += i.subtotal; g.vat += i.vat; g.total += i.total; g.n++; }
+    for (const i of fresh) { const k = `${i.date}|${i.branch}|${i.method}`; const g = (groups[k] ||= { date: i.date, branch: i.branch, method: i.method, subtotal: 0, vat: 0, total: 0, discount: 0, n: 0 }); g.subtotal += i.subtotal; g.vat += i.vat; g.total += i.total; g.discount += (i.discount || 0); g.n++; }
     const entries = [];
     for (const g of Object.values(groups)) {
-      const br = db.branches.find(b => b.id === g.branch) || {}; const pm = db.paymentMethods.find(p => p.key === g.method) || {};
+      const br = db.branches.find(b => b.id === g.branch) || {}; const pm = g.method === 'pos' ? { ar: 'نقاط البيع — تسوية عند الإقفال', en: 'POS — settled at day close' } : (db.paymentMethods.find(p => p.key === g.method) || {});
+      const disc = r2(g.discount), net = r2(g.subtotal), vat = r2(g.total - net);
       entries.push(postEntry(db, { date: g.date, branch: g.branch, type: 'sales', user: meta.user, ref: imp.file || '', source: { importId: imp.id, method: g.method, n: g.n },
         memo: bi(`مبيعات ${br.ar || ''} — ${pm.ar || g.method} (${g.n} فاتورة)`, `Sales ${br.en || ''} — ${pm.en || g.method} (${g.n} invoices)`),
-        lines: [{ account: methodAccount(db, g.method, g.branch), debit: r2(g.total) }, { account: branchSales(db, g.branch), credit: r2(g.subtotal) }, { account: db.sys.vatOut, credit: r2(g.total - r2(g.subtotal)) }] }));
+        lines: [{ account: methodAccount(db, g.method, g.branch), debit: r2(g.total) }, ...(disc ? [{ account: db.sys.salesDiscounts || '4105', debit: disc }] : []), { account: branchSales(db, g.branch), credit: r2(net + disc) }, { account: db.sys.vatOut, credit: vat }] }));
     }
     return { posted: fresh.length, skipped: invoices.length - fresh.length, importId: imp.id, entries };
   }
@@ -442,8 +445,24 @@
     for (const j of db.journal) { if (j.date !== date || j.type !== 'sales') continue; for (const l of j.lines) if (l.account === cash) v += l.debit - l.credit; }
     return r2(v);
   }
+  function posPending(db, date, branch) {
+    const acc0 = db.sys.posClearing || '110106'; let v = 0;
+    for (const j of db.journal) { if (j.date !== date) continue; for (const l of j.lines) if (l.account === acc0 && (l.branch || j.branch) === branch) v += l.debit - l.credit; }
+    return r2(v);
+  }
   function closeDay(db, c) {
     if (db.eod.find(e => e.date === c.date && e.branch === c.branch && !e.reopened)) throw err('closed');
+    const pos = posPending(db, c.date, c.branch);
+    if (pos > 0 && c.methods) {
+      const br = db.branches.find(b => b.id === c.branch) || {}; const lines = []; let sum = 0; const methods = {};
+      for (const [k, v] of Object.entries(c.methods)) { const a = r2(v); if (!a) continue; methods[k] = a; sum += a; lines.push({ account: methodAccount(db, k, c.branch), debit: a, branch: c.branch }); }
+      sum = r2(sum); const diff = r2(sum - pos);
+      lines.push({ account: db.sys.posClearing || '110106', credit: pos, branch: c.branch });
+      if (diff > 0) lines.push({ account: db.sys.cashOverShort, credit: diff, branch: c.branch }); else if (diff < 0) lines.push({ account: db.sys.cashOverShort, debit: -diff, branch: c.branch });
+      const je = postEntry(db, { date: c.date, branch: c.branch, type: 'eod', user: c.user, memo: bi(`تسوية مقبوضات ${br.ar} حسب طرق الدفع`, `POS settlement ${br.en} by payment method`), lines });
+      const rec = { id: uid(), date: c.date, branch: c.branch, mode: 'settle', expected: pos, counted: sum, diff, methods, notes: c.notes || '', user: c.user, at: c.at || new Date().toISOString(), journalId: je.id, sales: daySales(db, c.date, c.branch) };
+      db.eod.push(rec); return rec;
+    }
     const expected = expectedCash(db, c.date, c.branch); const diff = r2(c.counted - expected); let journalId = null;
     if (Math.abs(diff) >= 0.01) {
       const cash = branchCash(db, c.branch); const br = db.branches.find(b => b.id === c.branch) || {};
@@ -681,15 +700,19 @@
     let s = 7; const rnd = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
     // ---- 48 days of POS sales
     const methods = [['cash', 0.33], ['mada', 0.42], ['visa', 0.14], ['tabby', 0.07], ['tamara', 0.04]];
-    const branchMult = { b1: 1.0, b2: 0.78, b3: 0.64 };
+    const branchMult = { b1: 1.0, b2: 0.78, b3: 0.64 }; const skySeq = { b1: 8100001, b2: 8200001, b3: 8300001 }; const POS_DAYS = 10;
     for (let d = 48; d >= 0; d--) {
       const date = addDays(t0, -d); const dow = new Date(date + 'T00:00:00').getDay();
       const dayMult = (dow === 4 || dow === 5) ? 1.45 : (dow === 6 ? 1.15 : 1);
       for (const b of db.branches) {
         if (d === 0 && b.id === 'b3') continue;
         const n = Math.round((26 + rnd() * 18) * branchMult[b.id] * dayMult); const invoices = [];
-        for (let i = 0; i < n; i++) { const total = r2(8 + Math.pow(rnd(), 2.3) * 290); const sub = r2(total / 1.15); const x = rnd(); let a = 0, method = 'cash'; for (const [m, w] of methods) { a += w; if (x <= a) { method = m; break; } } invoices.push({ date, branch: b.id, no: `${b.code}-${date.replace(/-/g, '')}-${String(i + 1).padStart(3, '0')}`, subtotal: sub, vat: r2(total - sub), total, method }); }
-        postSalesBatch(db, invoices, { source: 'skysystem_export', file: `sales_${b.code}_${date}.csv`, user: db.users.find(u => u.branch === b.id).id, at: date + 'T23:10:00.000Z' });
+        const sky = d <= POS_DAYS;
+        for (let i = 0; i < n; i++) { const total = r2(8 + Math.pow(rnd(), 2.3) * 290); const sub = r2(total / 1.15); const x = rnd(); let a = 0, method = 'cash'; for (const [m, w] of methods) { a += w; if (x <= a) { method = m; break; } }
+          const hh = 10 + Math.floor(i / n * 13), mm = Math.floor(rnd() * 60);
+          invoices.push({ date, time: `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`, branch: b.id, no: sky ? 'S' + String(skySeq[b.id]++).padStart(7, '0') : `${b.code}-${date.replace(/-/g, '')}-${String(i + 1).padStart(3, '0')}`, subtotal: sub, vat: r2(total - sub), total, discount: 0, method: sky ? 'pos' : method, _m: method }); }
+        if (sky) for (const inv of invoices) { inv.split = inv._m; } for (const inv of invoices) delete inv._m;
+        postSalesBatch(db, invoices, { source: sky ? 'skysystem_xlsx' : 'skysystem_export', file: sky ? `rptSalesVatTax_${b.code}_${date}.xlsx` : `sales_${b.code}_${date}.csv`, user: db.users.find(u => u.branch === b.id).id, at: date + 'T23:10:00.000Z' });
       }
       // every 3 days: deposit branch cash to bank and settle gateways
       if (d % 3 === 0 && d > 0) {
@@ -727,7 +750,11 @@
     // ---- depreciation up to last completed month
     runDepreciation(db, addMonths(t0.slice(0, 7), -1), 'u2');
     // ---- EOD closings (all but last 3 days)
-    for (let d = 48; d >= 3; d--) { const date = addDays(t0, -d); for (const b of db.branches) { const exp = expectedCash(db, date, b.id); if (exp <= 0) continue; const diff = rnd() < 0.15 ? r2((rnd() - 0.5) * 60) : 0; closeDay(db, { date, branch: b.id, counted: r2(exp + diff), user: db.users.find(u => u.branch === b.id).id }); } }
+    for (let d = 48; d >= 3; d--) { const date = addDays(t0, -d); for (const b of db.branches) {
+      const uid0 = db.users.find(u => u.branch === b.id).id; const diff = rnd() < 0.15 ? r2((rnd() - 0.5) * 60) : 0;
+      if (posPending(db, date, b.id) > 0) { const methods = {}; for (const inv of db.salesInvoices) if (inv.date === date && inv.branch === b.id) methods[inv.split] = r2((methods[inv.split] || 0) + inv.total); methods.cash = r2((methods.cash || 0) + diff); closeDay(db, { date, branch: b.id, methods, user: uid0, at: date + 'T23:40:00.000Z' }); continue; }
+      const exp = expectedCash(db, date, b.id); if (exp <= 0) continue; closeDay(db, { date, branch: b.id, counted: r2(exp + diff), user: uid0 }); } }
+    for (const inv of db.salesInvoices) delete inv.split;
     db.journal.sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
     // renumber chronologically for a clean demo
     const seq = {}; for (const j of db.journal) { const y = j.date.slice(0, 4); seq[y] = (seq[y] || 0) + 1; j.no = y + String(seq[y]).padStart(6, '0'); } db.seq.je = seq;
@@ -757,10 +784,15 @@
   function load(tenantId) {
     tenantId = tenantId || 'candyloz'; current = tenantId;
     if (cache[tenantId]) return cache[tenantId];
-    if (hasLS) { try { const raw = localStorage.getItem(TKEY(tenantId)); if (raw) { cache[tenantId] = JSON.parse(raw); return cache[tenantId]; } } catch (e) { /* ignore */ } }
+    if (hasLS) { try { const raw = localStorage.getItem(TKEY(tenantId)); if (raw) { cache[tenantId] = migrate(JSON.parse(raw)); return cache[tenantId]; } } catch (e) { /* ignore */ } }
     const t = getPlatform().tenants.find(x => x.id === tenantId);
     cache[tenantId] = tenantId === 'candyloz' ? seedCandyLoz() : seedBlank(t || { name: tenantId });
     save(tenantId); return cache[tenantId];
+  }
+  function migrate(db) {
+    if (!db.accounts.find(a => a.code === '110106')) { db.accounts.push({ code: '110106', parent: '1101', ar: 'مقبوضات نقاط البيع تحت التسوية', en: 'POS receipts pending settlement', type: 'asset', group: false, contra: false, sub: false, active: true, system: true }); db.accounts.sort((x, y) => x.code.localeCompare(y.code)); }
+    db.sys.posClearing = db.sys.posClearing || '110106'; db.sys.salesDiscounts = db.sys.salesDiscounts || '4105';
+    return db;
   }
   function save(tenantId) { tenantId = tenantId || current; if (hasLS && cache[tenantId]) { try { localStorage.setItem(TKEY(tenantId), JSON.stringify(cache[tenantId])); } catch (e) { console.error('save failed', e); } } }
   function createTenant(t) {
@@ -780,6 +812,6 @@
     acc, childrenOf, levelOf, descendantLeaves, isUnder, nextCode, addAccount, updateAccount, deleteAccount, canDeleteAccount, hasPostings, natureOf,
     addBranch, branchCash, branchSales, methodAccount, postEntry, reverseEntry, postSalesBatch, daySales, validVAT, saveSupplier, saveCustomer, accountBalance, supplierBalance, customerBalance,
     createSupplierInvoice, postSupplierInvoice, invoiceStatus, createVoucher, paySupplierInvoice, createCustomerInvoice, createExpense, addAsset, runDepreciation, depreciationTo, monthlyDep, accDepFor,
-    expectedCash, closeDay, reopenDay, isClosed, closeYear, movements, rollup, trialBalance, incomeStatement, balanceSheet, cashFlow, statement, partyBalances, cashBalances, expensesReport, vatReport, salesReport, agedPayables,
+    expectedCash, posPending, closeDay, reopenDay, isClosed, closeYear, movements, rollup, trialBalance, incomeStatement, balanceSheet, cashFlow, statement, partyBalances, cashBalances, expensesReport, vatReport, salesReport, agedPayables,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
