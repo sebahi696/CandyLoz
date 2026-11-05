@@ -450,3 +450,20 @@ table.tbl.compact { min-width: 0; font-size: 13px; }
 
 @media (min-width: 1024px) { table.tbl { font-size: 13px; } .tbl th, .tbl td { padding: 9px 10px; } }
 @media (max-width: 640px) { .tiles.three { grid-template-columns: 1fr 1fr; } .tiles.three .tile:first-child { grid-column: 1 / -1; min-height: 56px; } .tiles.three .v { font-size: 18px; } .kpi .v { font-size: 19px; } }
+
+/* searchable combobox */
+.combo { position: relative; width: 100%; min-width: 0; }
+.combo-native { position: absolute !important; inset-inline-start: 0; bottom: 0; width: 1px !important; height: 1px !important; opacity: 0; pointer-events: none; }
+.combo-input { padding-inline-end: 36px; text-overflow: ellipsis; }
+.combo-caret { position: absolute; inset-inline-end: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; display: flex; }
+.combo-caret .ic { width: 17px; height: 17px; }
+.combo-list { position: absolute; z-index: 60; inset-inline: 0; top: calc(100% + 4px); max-height: 280px; overflow-y: auto; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: 0 14px 34px -14px rgba(11,20,55,.45); padding: 4px; min-width: 240px; }
+.combo-opt { padding: 9px 10px; border-radius: 8px; font-size: 14px; cursor: pointer; line-height: 1.35; }
+.combo-opt.on { background: var(--accent-soft); color: var(--accent); }
+.combo-opt.sel { font-weight: 700; }
+.combo-g { font-size: 11.5px; font-weight: 700; color: var(--muted); padding: 8px 10px 4px; position: sticky; top: -4px; background: var(--surface); }
+.combo-empty { padding: 10px; color: var(--muted); font-size: 13px; text-align: center; }
+.grow-sel .combo-input, .filterbar .combo-input { height: 40px; font-size: 14px; }
+.edited-tag { font-size: 11px; }
+.history { margin-top: 10px; }
+.history summary { cursor: pointer; font-size: 13px; color: var(--muted); }

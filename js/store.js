@@ -67,6 +67,7 @@
     { key: 'journal_view', ar: 'عرض القيود اليومية', en: 'View journal entries' },
     { key: 'journal', f: 'journal', ar: 'إنشاء قيود يدوية', en: 'Create manual entries' },
     { key: 'journal_reverse', ar: 'عكس القيود', en: 'Reverse entries' },
+    { key: 'edit_posted', ar: 'تعديل القيود والمستندات المرحّلة', en: 'Edit posted entries & documents' },
     { key: 'coa_view', ar: 'عرض شجرة الحسابات', en: 'View chart of accounts' },
     { key: 'coa_manage', f: 'coa_edit', ar: 'تعديل شجرة الحسابات', en: 'Edit chart of accounts' },
     { key: 'assets', f: 'assets', ar: 'الأصول الثابتة', en: 'Fixed assets' },
@@ -264,12 +265,27 @@
   function methodAccount(db, key, branch) { if (key === 'pos') return db.sys.posClearing || '110106'; const pm = db.paymentMethods.find(p => p.key === key) || db.paymentMethods[0]; return pm.account === '@branch_cash' ? branchCash(db, branch) : pm.account; }
 
   // ---------------------------------------------------------------- journal
-  function postEntry(db, e) {
+  function prepLines(db, e) {
     const lines = e.lines.map(l => ({ account: l.account, debit: r2(l.debit), credit: r2(l.credit), branch: l.branch || e.branch || null, note: l.note || '' })).filter(l => l.debit || l.credit);
     if (lines.length < 2) throw err('min_lines');
     for (const l of lines) { const a = acc(db, l.account); if (!a) throw err('no_account', l.account); if (a.group) throw err('group_account', a.code); if (l.debit < 0 || l.credit < 0) throw err('negative'); }
     const dr = r2(lines.reduce((s, l) => s + l.debit, 0)), cr = r2(lines.reduce((s, l) => s + l.credit, 0));
     if (Math.abs(dr - cr) > 0.005) throw err('unbalanced', `${dr} ≠ ${cr}`);
+    return { lines, dr };
+  }
+  // edit a posted entry in place (same number), keeping an audit trail of every previous version
+  function updateEntry(db, id, e) {
+    const j = db.journal.find(x => x.id === id); if (!j) throw err('no_entry');
+    if (j.reversedBy) throw err('already_reversed'); if (j.type === 'closing') throw err('closing_entry');
+    const date = e.date || j.date; const lock = db.settings.lockDate;
+    if (lock && (j.date <= lock || date <= lock)) throw err('period_locked', lock);
+    const { lines, dr } = prepLines(db, { ...e, branch: e.branch ?? j.branch, lines: e.lines || j.lines });
+    (j.history ||= []).push({ at: new Date().toISOString(), user: e.user || null, date: j.date, branch: j.branch, memo: j.memo, ref: j.ref, total: j.total, lines: j.lines });
+    Object.assign(j, { date, branch: e.branch ?? j.branch, memo: e.memo ?? j.memo, ref: e.ref ?? j.ref, lines, total: dr, editedAt: new Date().toISOString(), editedBy: e.user || null });
+    return j;
+  }
+  function postEntry(db, e) {
+    const { lines, dr } = prepLines(db, e);
     if (!e.force && db.settings.lockDate && e.date <= db.settings.lockDate) throw err('period_locked', db.settings.lockDate);
     const y = e.date.slice(0, 4); db.seq.je[y] = (db.seq.je[y] || 0) + 1;
     const entry = { id: uid(), no: y + String(db.seq.je[y]).padStart(6, '0'), date: e.date, branch: e.branch || null, type: e.type || 'manual', memo: e.memo || '', ref: e.ref || '', lines, source: e.source || null, user: e.user || null, createdAt: new Date().toISOString(), total: dr };
@@ -335,12 +351,27 @@
   }
   function postSupplierInvoice(db, id, user) {
     const inv = db.supplierInvoices.find(x => x.id === id); if (!inv || inv.status !== 'draft') return inv;
+    const { sup, lines, memo } = purchaseLines(db, inv);
+    const je = postEntry(db, { date: inv.date, branch: inv.branch, type: 'purchase', user, ref: inv.no, source: { invoiceId: inv.id }, memo, lines });
+    inv.status = 'posted'; inv.journalId = je.id; inv.postedAt = new Date().toISOString(); inv.postedBy = user; return inv;
+  }
+  function purchaseLines(db, inv) {
     const sup = db.suppliers.find(s => s.id === inv.supplierId); if (!sup) throw err('no_supplier');
     const lines = [{ account: inv.account || db.sys.purchases, debit: inv.subtotal }];
     if (inv.vat > 0) lines.push({ account: db.sys.vatIn, debit: inv.vat });
     lines.push({ account: sup.account, credit: inv.total });
-    const je = postEntry(db, { date: inv.date, branch: inv.branch, type: 'purchase', user, ref: inv.no, source: { invoiceId: inv.id }, memo: bi(`فاتورة مشتريات ${inv.no} — ${sup.name}`, `Purchase invoice ${inv.no} — ${sup.nameEn || sup.name}`), lines });
-    inv.status = 'posted'; inv.journalId = je.id; inv.postedAt = new Date().toISOString(); inv.postedBy = user; return inv;
+    return { sup, lines, memo: bi(`فاتورة مشتريات ${inv.no} — ${sup.name}`, `Purchase invoice ${inv.no} — ${sup.nameEn || sup.name}`) };
+  }
+  function updateSupplierInvoice(db, id, patch, user) {
+    const inv = db.supplierInvoices.find(x => x.id === id); if (!inv) throw err('no_invoice');
+    const next = { ...inv, ...patch, subtotal: r2(patch.subtotal ?? inv.subtotal), vat: r2(patch.vat ?? inv.vat), total: r2(patch.total ?? inv.total) };
+    if (!(next.total > 0)) throw err('amount');
+    if (inv.status === 'posted') {
+      if (next.total < inv.paid - 0.005) throw err('below_paid', String(inv.paid));
+      const { lines, memo } = purchaseLines(db, next);
+      updateEntry(db, inv.journalId, { date: next.date, branch: next.branch, ref: next.no, memo, lines, user });
+    }
+    Object.assign(inv, next, { editedAt: new Date().toISOString(), editedBy: user || null }); return inv;
   }
   function invoiceStatus(inv, today) {
     today = today || todayISO();
@@ -359,6 +390,15 @@
     const amount = r2(v.amount); if (!(amount > 0)) throw err('amount');
     const fee = r2(v.fee || 0);
     const no = nextVoucherNo(db, v.kind, prefix);
+    const { lines, memo } = voucherLines(db, v, no, amount, fee);
+    const je = postEntry(db, { date: v.date, branch: v.branch, type: v.kind, user: v.user, ref: no, memo, lines, source: { voucher: no, invoiceId: v.invoiceId || null } });
+    const rec = { id: uid(), no, kind: v.kind, date: v.date, branch: v.branch || null, amount, fee, from: v.from, to: v.to, party: v.party || '', method: v.method || '', notes: v.notes || '', approvedBy: v.approvedBy || '', invoiceId: v.invoiceId || null, journalId: je.id, user: v.user || null, createdAt: new Date().toISOString() };
+    db.vouchers.push(rec);
+    if (v.invoiceId) { const inv = findAnyInvoice(db, v.invoiceId); if (inv) inv.paid = r2((inv.paid || 0) + amount); }
+    return rec;
+  }
+  const findAnyInvoice = (db, id) => db.supplierInvoices.find(i => i.id === id) || db.customerInvoices.find(i => i.id === id);
+  function voucherLines(db, v, no, amount, fee) {
     const nameOf = (c) => { const a = acc(db, c); return a ? a : { ar: c, en: c }; };
     const memo = v.memo || (v.kind === 'receipt' ? bi(`سند قبض ${no} من ${nameOf(v.from).ar}`, `Receipt ${no} from ${nameOf(v.from).en}`)
       : v.kind === 'payment' ? bi(`سند صرف ${no} إلى ${nameOf(v.to).ar}`, `Payment ${no} to ${nameOf(v.to).en}`)
@@ -366,10 +406,18 @@
     const lines = v.kind === 'transfer'
       ? [{ account: v.to, debit: r2(amount - fee) }, ...(fee ? [{ account: v.feeAccount || db.sys.bankCharges, debit: fee }] : []), { account: v.from, credit: amount }]
       : [{ account: v.to, debit: amount }, { account: v.from, credit: amount }];
-    const je = postEntry(db, { date: v.date, branch: v.branch, type: v.kind, user: v.user, ref: no, memo, lines, source: { voucher: no, invoiceId: v.invoiceId || null } });
-    const rec = { id: uid(), no, kind: v.kind, date: v.date, branch: v.branch || null, amount, fee, from: v.from, to: v.to, party: v.party || '', method: v.method || '', notes: v.notes || '', approvedBy: v.approvedBy || '', invoiceId: v.invoiceId || null, journalId: je.id, user: v.user || null, createdAt: new Date().toISOString() };
-    db.vouchers.push(rec);
-    if (v.invoiceId) { const inv = db.supplierInvoices.find(i => i.id === v.invoiceId) || db.customerInvoices.find(i => i.id === v.invoiceId); if (inv) inv.paid = r2((inv.paid || 0) + amount); }
+    return { lines, memo };
+  }
+  function updateVoucher(db, id, v, user) {
+    const rec = db.vouchers.find(x => x.id === id); if (!rec) throw err('no_voucher');
+    const amount = r2(v.amount ?? rec.amount); if (!(amount > 0)) throw err('amount');
+    const fee = r2(v.fee ?? rec.fee ?? 0);
+    const next = { ...rec, ...v, kind: rec.kind, amount, fee };
+    const { lines, memo } = voucherLines(db, { ...next, memo: null }, rec.no, amount, fee);
+    updateEntry(db, rec.journalId, { date: next.date, branch: next.branch, ref: rec.no, memo, lines, user });
+    if (rec.invoiceId) { const inv = findAnyInvoice(db, rec.invoiceId); if (inv) inv.paid = r2(inv.paid - rec.amount); }
+    Object.assign(rec, next, { editedAt: new Date().toISOString(), editedBy: user || null });
+    if (rec.invoiceId) { const inv = findAnyInvoice(db, rec.invoiceId); if (inv) inv.paid = r2(inv.paid + amount); }
     return rec;
   }
   function paySupplierInvoice(db, { invoiceId, amount, date, from, user, branch }) {
@@ -386,12 +434,21 @@
     const no = ci.no || nextVoucherNo(db, 'si', 'SI');
     const je = postEntry(db, { date: ci.date, branch: ci.branch, type: 'credit_sale', user: ci.user, ref: no, memo: bi(`فاتورة بيع آجل ${no} — ${cust.name}`, `Credit invoice ${no} — ${cust.nameEn || cust.name}`),
       lines: [{ account: cust.account, debit: total }, { account: ci.account || db.sys.salesCorporate, credit: subtotal }, { account: db.sys.vatOut, credit: vat }] });
-    const rec = { id: uid(), no, customerId: cust.id, date: ci.date, due: ci.due || addDays(ci.date, cust.terms || 30), branch: ci.branch, subtotal, vat, total, paid: 0, notes: ci.notes || '', journalId: je.id };
+    const rec = { id: uid(), no, customerId: cust.id, date: ci.date, due: ci.due || addDays(ci.date, cust.terms || 30), branch: ci.branch, account: ci.account || db.sys.salesCorporate, subtotal, vat, total, paid: 0, notes: ci.notes || '', journalId: je.id };
     db.customerInvoices.push(rec); return rec;
+  }
+  function updateCustomerInvoice(db, id, ci, user) {
+    const rec = db.customerInvoices.find(x => x.id === id); if (!rec) throw err('no_invoice');
+    const cust = db.customers.find(c => c.id === (ci.customerId || rec.customerId)); if (!cust) throw err('no_customer');
+    const total = r2(ci.total ?? rec.total); if (!(total > 0)) throw err('amount'); if (total < rec.paid - 0.005) throw err('below_paid', String(rec.paid));
+    const subtotal = r2(total / (1 + VAT_RATE)), vat = r2(total - subtotal); const account = ci.account || rec.account || db.sys.salesCorporate; const date = ci.date || rec.date;
+    updateEntry(db, rec.journalId, { date, branch: ci.branch || rec.branch, ref: rec.no, user, memo: bi(`فاتورة بيع آجل ${rec.no} — ${cust.name}`, `Credit invoice ${rec.no} — ${cust.nameEn || cust.name}`),
+      lines: [{ account: cust.account, debit: total }, { account, credit: subtotal }, { account: db.sys.vatOut, credit: vat }] });
+    Object.assign(rec, { customerId: cust.id, date, branch: ci.branch || rec.branch, account, subtotal, vat, total, notes: ci.notes ?? rec.notes, editedAt: new Date().toISOString(), editedBy: user || null }); return rec;
   }
 
   // ---------------------------------------------------------------- expenses
-  function createExpense(db, x) {
+  function calcExpense(db, x) {
     let subtotal = 0, vat = 0;
     const lines = x.lines.map(l => { const gross = r2((+l.price || 0) * (+l.qty || 1)); const net = r2(gross - (+l.discount || 0)); const lv = l.taxable ? r2(net * VAT_RATE) : 0; subtotal += net; vat += lv; return { account: l.account, desc: l.desc || '', price: +l.price || 0, qty: +l.qty || 1, discount: +l.discount || 0, taxable: !!l.taxable, net, vat: lv }; });
     subtotal = r2(subtotal); vat = r2(vat); const total = r2(subtotal + vat);
@@ -399,14 +456,26 @@
     const sup = x.supplierId ? db.suppliers.find(s => s.id === x.supplierId) : null;
     const credit = x.payMethod === 'credit' ? (sup ? sup.account : null) : (x.payAccount || (x.payMethod === 'cash' ? branchCash(db, x.branch) : db.sys.bank));
     if (!credit) throw err('no_supplier');
-    const no = nextVoucherNo(db, 'ex', 'EX');
     const jl = lines.map(l => ({ account: l.account, debit: l.net, note: l.desc }));
     if (vat) jl.push({ account: db.sys.vatIn, debit: vat });
     jl.push({ account: credit, credit: total });
-    const first = acc(db, lines[0].account) || {};
-    const je = postEntry(db, { date: x.date, branch: x.branch, type: 'expense', user: x.user, ref: x.ref || no, memo: x.memo || bi(`مصروف ${no} — ${x.desc || first.ar || ''}`, `Expense ${no} — ${x.descEn || x.desc || first.en || ''}`), lines: jl });
+    return { lines, jl, subtotal, vat, total, credit };
+  }
+  const expenseMemo = (db, x, no, lines) => { const first = acc(db, lines[0].account) || {}; return bi(`مصروف ${no} — ${x.desc || first.ar || ''}`, `Expense ${no} — ${x.descEn || x.desc || first.en || ''}`); };
+  function createExpense(db, x) {
+    const { lines, jl, subtotal, vat, total, credit } = calcExpense(db, x);
+    const no = nextVoucherNo(db, 'ex', 'EX');
+    const je = postEntry(db, { date: x.date, branch: x.branch, type: 'expense', user: x.user, ref: x.ref || no, memo: x.memo || expenseMemo(db, x, no, lines), lines: jl });
     const rec = { id: uid(), no, date: x.date, branch: x.branch, supplierId: x.supplierId || null, payMethod: x.payMethod, payAccount: credit, desc: x.desc || '', ref: x.ref || '', lines, subtotal, vat, total, attachment: x.attachment || null, journalId: je.id, user: x.user || null };
     db.expenses.push(rec); return rec;
+  }
+  function updateExpense(db, id, x, user) {
+    const rec = db.expenses.find(e => e.id === id); if (!rec) throw err('no_expense');
+    const merged = { ...rec, ...x };
+    const { lines, jl, subtotal, vat, total, credit } = calcExpense(db, merged);
+    updateEntry(db, rec.journalId, { date: merged.date, branch: merged.branch, ref: merged.ref || rec.no, memo: expenseMemo(db, merged, rec.no, lines), lines: jl, user });
+    Object.assign(rec, { date: merged.date, branch: merged.branch, supplierId: merged.supplierId || null, payMethod: merged.payMethod, payAccount: credit, desc: merged.desc || '', lines, subtotal, vat, total, editedAt: new Date().toISOString(), editedBy: user || null });
+    return rec;
   }
 
   // ---------------------------------------------------------------- fixed assets
@@ -791,6 +860,7 @@
   }
   function migrate(db) {
     if (!db.accounts.find(a => a.code === '110106')) { db.accounts.push({ code: '110106', parent: '1101', ar: 'مقبوضات نقاط البيع تحت التسوية', en: 'POS receipts pending settlement', type: 'asset', group: false, contra: false, sub: false, active: true, system: true }); db.accounts.sort((x, y) => x.code.localeCompare(y.code)); }
+    if (!db.migrations || !db.migrations.editPosted) { db.migrations = { ...(db.migrations || {}), editPosted: true }; if (db.roles && db.roles.accountant && !db.roles.accountant.includes('edit_posted')) db.roles.accountant.push('edit_posted'); }
     db.sys.posClearing = db.sys.posClearing || '110106'; db.sys.salesDiscounts = db.sys.salesDiscounts || '4105';
     return db;
   }
@@ -810,8 +880,8 @@
     VAT_RATE, FEATURES, PERMS, ROLE_DEFAULTS, COA_CANDY, uid, r2, todayISO, addDays, addMonths, monthEnd, daysBetween, bi,
     getPlatform, savePlatform, load, save, createTenant, resetTenant, resetAll, replace, seedCandyLoz, seedBlank, emptyDb, get current() { return current; },
     acc, childrenOf, levelOf, descendantLeaves, isUnder, nextCode, addAccount, updateAccount, deleteAccount, canDeleteAccount, hasPostings, natureOf,
-    addBranch, branchCash, branchSales, methodAccount, postEntry, reverseEntry, postSalesBatch, daySales, validVAT, saveSupplier, saveCustomer, accountBalance, supplierBalance, customerBalance,
-    createSupplierInvoice, postSupplierInvoice, invoiceStatus, createVoucher, paySupplierInvoice, createCustomerInvoice, createExpense, addAsset, runDepreciation, depreciationTo, monthlyDep, accDepFor,
+    addBranch, branchCash, branchSales, methodAccount, postEntry, updateEntry, reverseEntry, postSalesBatch, daySales, validVAT, saveSupplier, saveCustomer, accountBalance, supplierBalance, customerBalance,
+    createSupplierInvoice, updateSupplierInvoice, postSupplierInvoice, invoiceStatus, createVoucher, updateVoucher, paySupplierInvoice, createCustomerInvoice, updateCustomerInvoice, createExpense, updateExpense, addAsset, runDepreciation, depreciationTo, monthlyDep, accDepFor,
     expectedCash, posPending, closeDay, reopenDay, isClosed, closeYear, movements, rollup, trialBalance, incomeStatement, balanceSheet, cashFlow, statement, partyBalances, cashBalances, expensesReport, vatReport, salesReport, agedPayables,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

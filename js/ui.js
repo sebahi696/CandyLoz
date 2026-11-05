@@ -92,7 +92,55 @@ window.UI = (() => {
     }
     return out;
   }
-  const accSelect = (db, name, val, opts = {}) => sel(name, accountOptions(db, opts), val, opts.attrs || '');
+  const accSelect = (db, name, val, opts = {}) => sel(name, accountOptions(db, opts), val, 'data-combo ' + (opts.attrs || ''));
+
+  // ---- searchable combobox: enhances any <select data-combo>; the native select stays in the form (value, change events)
+  const AR_DIG = '٠١٢٣٤٥٦٧٨٩';
+  const norm = (s) => String(s || '').toLowerCase().replace(/[\u064B-\u0652\u0640]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/ؤ/g, 'و').replace(/ئ/g, 'ي').replace(/[٠-٩]/g, d => AR_DIG.indexOf(d)).replace(/\s+/g, ' ').trim();
+  function enhanceSelect(sel) {
+    if (sel.dataset.enhanced) return; sel.dataset.enhanced = '1';
+    const wrap = document.createElement('div'); wrap.className = 'combo'; sel.parentNode.insertBefore(wrap, sel); wrap.appendChild(sel);
+    sel.classList.add('combo-native'); sel.tabIndex = -1; sel.setAttribute('aria-hidden', 'true');
+    const input = document.createElement('input'); input.type = 'text'; input.className = 'input combo-input'; input.autocomplete = 'off'; input.spellcheck = false;
+    input.setAttribute('role', 'combobox'); input.setAttribute('aria-autocomplete', 'list'); input.setAttribute('aria-expanded', 'false'); input.placeholder = t('type_to_search');
+    const lid = 'cl' + Math.random().toString(36).slice(2, 8); input.setAttribute('aria-controls', lid);
+    const list = document.createElement('div'); list.className = 'combo-list'; list.id = lid; list.setAttribute('role', 'listbox'); list.hidden = true;
+    const clear = document.createElement('span'); clear.className = 'combo-caret'; clear.innerHTML = icon('search');
+    wrap.append(input, clear, list);
+    const label = () => { const o = sel.options[sel.selectedIndex]; return o && o.value !== '' ? o.textContent : ''; };
+    const sync = () => { input.value = label(); wrap.classList.toggle('has', !!sel.value); };
+    let items = [], active = -1;
+    const all = () => [...sel.options].filter(o => !o.disabled).map(o => ({ v: o.value, l: o.textContent, g: o.parentElement && o.parentElement.tagName === 'OPTGROUP' ? o.parentElement.label : '', n: norm(o.textContent) }));
+    function render(q) {
+      const words = norm(q).split(' ').filter(Boolean);
+      items = all().filter(o => o.v !== '' && (!words.length || words.every(w => o.n.includes(w))));
+      // exact code prefix first
+      if (words.length === 1 && /^\d+$/.test(words[0])) items.sort((a, b) => (b.n.startsWith(words[0]) ? 1 : 0) - (a.n.startsWith(words[0]) ? 1 : 0));
+      const shown = items.slice(0, 150); active = Math.max(0, shown.findIndex(o => o.v === sel.value));
+      if (!shown.length) { list.innerHTML = `<div class="combo-empty">${esc(t('no_results'))}</div>`; }
+      else { let g = null; list.innerHTML = shown.map((o, i) => { const head = o.g && o.g !== g && !words.length ? `<div class="combo-g">${esc(o.g)}</div>` : ''; g = o.g; return head + `<div class="combo-opt ${i === active ? 'on' : ''} ${o.v === sel.value ? 'sel' : ''}" role="option" data-i="${i}" aria-selected="${o.v === sel.value}">${esc(o.l)}</div>`; }).join('') + (items.length > shown.length ? `<div class="combo-empty">+${items.length - shown.length}</div>` : ''); }
+      items = shown; list.hidden = false; input.setAttribute('aria-expanded', 'true'); scrollActive();
+    }
+    const scrollActive = () => { const el = list.querySelector('.combo-opt.on'); if (el) el.scrollIntoView({ block: 'nearest' }); };
+    const close = () => { list.hidden = true; input.setAttribute('aria-expanded', 'false'); };
+    const pick = (i) => { const o = items[i]; if (!o) return; if (sel.value !== o.v) { sel.value = o.v; sel.dispatchEvent(new Event('change', { bubbles: true })); } sync(); close(); };
+    input.addEventListener('focus', () => { input.select(); render(''); });
+    input.addEventListener('click', () => { if (list.hidden) render(''); });
+    input.addEventListener('input', () => render(input.value));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (list.hidden) render(''); active = Math.max(0, Math.min(items.length - 1, active + (e.key === 'ArrowDown' ? 1 : -1))); list.querySelectorAll('.combo-opt').forEach((x, i) => x.classList.toggle('on', i === active)); scrollActive(); }
+      else if (e.key === 'Enter') { if (!list.hidden) { e.preventDefault(); pick(active); } }
+      else if (e.key === 'Escape') { if (!list.hidden) { e.stopPropagation(); close(); sync(); } }
+      else if (e.key === 'Tab' && !list.hidden && input.value !== label() && items.length) pick(active);
+    });
+    list.addEventListener('mousedown', (e) => { e.preventDefault(); const el = e.target.closest('.combo-opt'); if (el) pick(+el.dataset.i); });
+    input.addEventListener('blur', () => setTimeout(() => { close(); sync(); }, 120));
+    sel.addEventListener('change', sync);
+    sel._sync = sync; sync();
+  }
+  const enhanceAll = (root) => { (root.querySelectorAll ? root.querySelectorAll('select[data-combo]') : []).forEach(enhanceSelect); };
+  if (typeof MutationObserver !== 'undefined') new MutationObserver((muts) => { for (const m of muts) for (const n of m.addedNodes) if (n.nodeType === 1) { if (n.matches && n.matches('select[data-combo]')) enhanceSelect(n); else enhanceAll(n); } }).observe(document.documentElement, { childList: true, subtree: true });
+  const setSelect = (el, v) => { if (!el) return; el.value = v; if (el._sync) el._sync(); };
 
   // tables
   const th = (cols) => `<thead><tr>${cols.map(c => `<th class="${c.r ? 'money' : ''} ${c.cls || ''}">${esc(c.l)}</th>`).join('')}</tr></thead>`;
@@ -102,5 +150,5 @@ window.UI = (() => {
   const pill = (txt, kind) => `<span class="pill ${kind || 'neutral'}">${esc(txt)}</span>`;
   const empty = (msg) => `<div class="empty">${esc(msg)}</div>`;
 
-  return { $, $$, esc, L, money, I, icon, logo, toast, fail, errText, openSheet, closeSheet, confirmInline, field, inp, sel, dateInput, moneyInput, check, toggle, formData, seg, bindSeg, accountOptions, accSelect, th, download, csv, initials, pill, empty };
+  return { $, $$, esc, L, money, I, icon, logo, toast, fail, errText, openSheet, closeSheet, confirmInline, field, inp, sel, setSelect, enhanceSelect, norm, dateInput, moneyInput, check, toggle, formData, seg, bindSeg, accountOptions, accSelect, th, download, csv, initials, pill, empty };
 })();

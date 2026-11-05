@@ -104,7 +104,7 @@
     const d = db(); if (args[0]) { ST.code = args[0]; history.replaceState(null, '', '#/reports/statement'); }
     const [from, to] = A.periodRange(P);
     const opts = [{ v: '', l: t('pick_subject') }, { group: t('suppliers'), options: d.suppliers.map(s => ({ v: s.account, l: L({ ar: s.name, en: s.nameEn }) })) }, { group: t('customers'), options: d.customers.map(s => ({ v: s.account, l: L({ ar: s.name, en: s.nameEn }) })) }, ...U.accountOptions(d, { includeGroups: true })];
-    const extra = `<span class="grow-sel">${U.sel('subject', opts, ST.code, 'data-subject')}</span><select class="select fb" data-view><option value="detail" ${ST.view === 'detail' ? 'selected' : ''}>${esc(t('detail'))}</option><option value="monthly" ${ST.view === 'monthly' ? 'selected' : ''}>${esc(t('monthly'))}</option></select>
+    const extra = `<span class="grow-sel">${U.sel('subject', opts, ST.code, 'data-subject data-combo')}</span><select class="select fb" data-view><option value="detail" ${ST.view === 'detail' ? 'selected' : ''}>${esc(t('detail'))}</option><option value="monthly" ${ST.view === 'monthly' ? 'selected' : ''}>${esc(t('monthly'))}</option></select>
       <select class="select fb" data-ty><option value="">${esc(t('entry_type'))}: ${esc(t('all'))}</option>${['sales', 'credit_sale', 'purchase', 'expense', 'receipt', 'payment', 'transfer', 'manual', 'opening', 'depreciation', 'eod', 'reversal'].map(x => `<option value="${x}" ${ST.type === x ? 'selected' : ''}>${esc(t('jt_' + x))}</option>`).join('')}</select>`;
     let body = U.empty(t('pick_subject')), st = null;
     if (ST.code && S.acc(d, ST.code)) {

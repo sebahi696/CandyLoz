@@ -76,7 +76,7 @@
       <div class="tiles three"><div class="tile"><span class="k">${esc(t('count'))}</span><span class="v num">${list.length}</span></div><div class="tile"><span class="k">${esc(t('total_debit'))}</span><span class="v money">${money(totDr)}</span></div><div class="tile"><span class="k">${esc(t('total_credit'))}</span><span class="v money">${money(totDr)}</span></div></div>
       ${list.length ? `<div class="tablewrap mt"><table class="tbl jtable">${U.th([{ l: t('entry_no') }, { l: t('date') }, { l: t('branch') }, { l: t('entry_type') }, { l: t('accounts') }, { l: t('debit'), r: 1 }, { l: t('credit'), r: 1 }, { l: t('description') }, { l: '' }])}<tbody>${list.slice(0, jP.limit).map(j => `<tr class="click ${j.reversedBy ? 'struck' : ''}" data-j="${j.id}"><td class="code">${j.no}</td><td class="num">${j.date}</td><td>${esc(j.branch ? A.branchName(j.branch) : '—')}</td><td>${U.pill(t('jt_' + j.type), j.type === 'manual' || j.type === 'opening' ? 'info' : j.type === 'reversal' ? 'warn' : 'neutral')}</td>
         <td class="stack-cell">${j.lines.map(l => `<div class="${l.credit ? 'cr-ind' : ''}">${esc(A.accShort(l.account))}</div>`).join('')}</td><td class="money stack-cell">${j.lines.map(l => `<div>${l.debit ? money(l.debit) : '&nbsp;'}</div>`).join('')}</td><td class="money stack-cell">${j.lines.map(l => `<div>${l.credit ? money(l.credit) : '&nbsp;'}</div>`).join('')}</td>
-        <td class="memo">${esc(A.memoText(j.memo))}${j.reversedBy ? ' ' + U.pill(t('is_reversed'), 'warn') : ''}</td><td>${icon('eye')}</td></tr>`).join('')}</tbody></table></div>${list.length > jP.limit ? `<button class="btn ghost mt" data-more>+ ${list.length - jP.limit}</button>` : ''}` : U.empty('—')}`;
+        <td class="memo">${esc(A.memoText(j.memo))}${j.reversedBy ? ' ' + U.pill(t('is_reversed'), 'warn') : ''}${j.editedAt ? ' ' + U.pill(t('edited'), 'info') : ''}</td><td>${icon('eye')}</td></tr>`).join('')}</tbody></table></div>${list.length > jP.limit ? `<button class="btn ghost mt" data-more>+ ${list.length - jP.limit}</button>` : ''}` : U.empty('—')}`;
     A.bindFilter(main, jP, () => Screens.journal(main, []));
     $('[data-type]', main).onchange = (e) => { jP.type = e.target.value; Screens.journal(main, []); };
     $('[data-no]', main).onchange = (e) => { jP.no = e.target.value.trim(); Screens.journal(main, []); };
@@ -89,35 +89,49 @@
   Screens.entrySheet = (id) => {
     const d = db(); const j = d.journal.find(x => x.id === id); if (!j) return;
     const canRev = A.can('journal_reverse') && !j.reversedBy && !['closing', 'reversal'].includes(j.type);
+    const locked = d.settings.lockDate && j.date <= d.settings.lockDate;
+    let edit = null;
+    if (A.can('edit_posted') && !j.reversedBy && j.type !== 'closing' && !locked) {
+      const src = j.source || {};
+      if (['manual', 'opening'].includes(j.type) && A.can('journal')) edit = { label: 'edit_entry', go: () => entryForm(j) };
+      else if (j.type === 'purchase' && src.invoiceId && A.can('purchases')) edit = { label: 'edit_invoice', go: () => Screens.invoiceForm({ edit: src.invoiceId }) };
+      else if (j.type === 'expense' && A.can('expenses')) { const x = d.expenses.find(e => e.journalId === j.id); if (x) edit = { label: 'edit_expense', go: () => Screens.expenseForm(x) }; }
+      else if (['receipt', 'payment', 'transfer'].includes(j.type) && A.can('vouchers')) { const v = d.vouchers.find(e => e.journalId === j.id); if (v) edit = { label: 'edit_voucher', go: () => Screens.voucherForm(v.kind, {}, v) }; }
+      else if (j.type === 'credit_sale' && A.can('customers')) { const ci = d.customerInvoices.find(e => e.journalId === j.id); if (ci) edit = { label: 'edit_invoice', go: () => Screens.creditInvoiceForm(ci.customerId, ci) }; }
+    }
+    const hist = (j.history || []).slice().reverse();
     U.openSheet({ title: t('entry_details') + ' ' + j.no, xwide: true, body: `<div class="printable">
       <div class="grid3"><div class="kv"><span class="k">${esc(t('date'))}</span><span class="v">${esc(fmtDate(j.date))}</span></div><div class="kv"><span class="k">${esc(t('entry_type'))}</span><span class="v">${esc(t('jt_' + j.type))}</span></div><div class="kv"><span class="k">${esc(t('reference'))}</span><span class="v code">${esc(j.ref || '—')}</span></div></div>
       <p class="strong">${esc(A.memoText(j.memo))}</p>
       <div class="tablewrap"><table class="tbl compact">${U.th([{ l: t('account') }, { l: t('line_note') }, { l: t('branch') }, { l: t('debit'), r: 1 }, { l: t('credit'), r: 1 }])}<tbody>${j.lines.map(l => `<tr><td>${esc(A.accName(l.account))}</td><td>${esc(l.note || '')}</td><td>${esc(l.branch ? A.branchName(l.branch) : '—')}</td><td class="money">${money(l.debit, { blankZero: true })}</td><td class="money">${money(l.credit, { blankZero: true })}</td></tr>`).join('')}
       <tr class="total"><td colspan="3">${esc(t('totals'))}</td><td class="money">${money(j.total)}</td><td class="money">${money(j.total)}</td></tr></tbody></table></div>
-      <p class="small muted">${esc(t('user'))}: ${esc(A.userName(d.users.find(u => u.id === j.user)) || '—')} · ${esc(j.createdAt.slice(0, 16).replace('T', ' '))}${j.reversedBy ? ' · ' + esc(t('is_reversed')) : ''}</p></div>
-      <div class="btnrow"><button class="btn secondary" data-print>${icon('print')}${esc(t('print'))}</button>${canRev ? `<button class="btn danger" data-rev>${icon('undo')}${esc(t('reverse'))}</button>` : ''}</div><div id="confirm"></div>`, onMount: (sh) => {
+      <p class="small muted">${esc(t('user'))}: ${esc(A.userName(d.users.find(u => u.id === j.user)) || '—')} · ${esc(j.createdAt.slice(0, 16).replace('T', ' '))}${j.reversedBy ? ' · ' + esc(t('is_reversed')) : ''}${j.editedAt ? ` · ${esc(t('edited_by'))}: ${esc(A.userName(d.users.find(u => u.id === j.editedBy)) || '—')} ${esc(j.editedAt.slice(0, 16).replace('T', ' '))}` : ''}</p>
+      ${hist.length ? `<details class="history"><summary>${esc(t('history_n', { n: hist.length }))}</summary>${hist.map(h => `<div class="card mt"><div class="small muted">${esc(t('prev_version'))} · ${esc(h.at.slice(0, 16).replace('T', ' '))} · ${esc(A.userName(d.users.find(u => u.id === h.user)) || '—')} · ${esc(h.date)} · ${esc(A.memoText(h.memo))}</div><table class="tbl compact">${h.lines.map(l => `<tr><td>${esc(A.accName(l.account))}</td><td class="money">${money(l.debit, { blankZero: true })}</td><td class="money">${money(l.credit, { blankZero: true })}</td></tr>`).join('')}</table></div>`).join('')}</details>` : ''}</div>
+      <div class="btnrow"><button class="btn secondary" data-print>${icon('print')}${esc(t('print'))}</button>${edit ? `<button class="btn primary" data-edit>${icon('pen')}${esc(t(edit.label))}</button>` : ''}${canRev ? `<button class="btn danger" data-rev>${icon('undo')}${esc(t('reverse'))}</button>` : ''}</div>${locked && A.can('edit_posted') ? `<p class="hint">${icon('lock')} ${esc(t('edit_locked'))}</p>` : ''}<div id="confirm"></div>`, onMount: (sh) => {
+      const eb = $('[data-edit]', sh); if (eb) eb.onclick = () => edit.go();
       $('[data-print]', sh).onclick = () => { document.body.classList.add('print-sheet'); window.print(); setTimeout(() => document.body.classList.remove('print-sheet'), 500); };
       const r = $('[data-rev]', sh); if (r) r.onclick = () => U.confirmInline($('#confirm', sh), t('are_you_sure'), () => { try { S.reverseEntry(d, id, { user: A.user().id, date: j.date < (d.settings.lockDate || '') ? today() : undefined }); U.closeSheet(); A.commit(t('reversed')); } catch (er) { U.fail(er); } }, t('reverse'));
     } });
   };
-  function entryForm() {
-    const d = db(); let n = 0;
-    const row = (i) => `<div class="jline" data-i="${i}"><div class="g-acc">${U.accSelect(d, 'a_' + i, '', { blank: '— ' + t('pick_account') + ' —' })}</div><input class="input money" type="number" step="0.01" min="0" name="d_${i}" placeholder="${esc(t('debit'))}" dir="ltr"><input class="input money" type="number" step="0.01" min="0" name="c_${i}" placeholder="${esc(t('credit'))}" dir="ltr"><input class="input" name="n_${i}" placeholder="${esc(t('line_note'))}"><button type="button" class="iconbtn sm" data-rm aria-label="${esc(t('delete'))}">${icon('trash')}</button></div>`;
-    U.openSheet({ title: t('new_entry'), xwide: true, body: `<form id="jf">
-      <div class="grid3">${U.field(t('date'), U.dateInput('date', today()))}${A.branchField('branch')}${U.field(t('entry_type'), U.sel('type', [{ v: 'manual', l: t('jt_manual') }, { v: 'opening', l: t('jt_opening') }], 'manual'))}</div>
-      <div class="grid2">${U.field(t('description'), U.inp('memo', '', 'required'))}${U.field(t('reference'), U.inp('ref', '', 'dir="ltr"'))}</div>
+  function entryForm(j) {
+    const d = db(); let n = 0; const ed = j || null;
+    const row = (i, l = {}) => `<div class="jline" data-i="${i}"><div class="g-acc">${U.accSelect(d, 'a_' + i, l.account || '', { blank: '— ' + t('pick_account') + ' —' })}</div><input class="input money" type="number" step="0.01" min="0" name="d_${i}" placeholder="${esc(t('debit'))}" dir="ltr" value="${l.debit || ''}"><input class="input money" type="number" step="0.01" min="0" name="c_${i}" placeholder="${esc(t('credit'))}" dir="ltr" value="${l.credit || ''}"><input class="input" name="n_${i}" placeholder="${esc(t('line_note'))}" value="${esc(l.note || '')}"><button type="button" class="iconbtn sm" data-rm aria-label="${esc(t('delete'))}">${icon('trash')}</button></div>`;
+    const initial = ed ? ed.lines.map(l => row(n++, l)).join('') : row(n++) + row(n++);
+    U.openSheet({ title: ed ? t('edit_entry') + ' ' + ed.no : t('new_entry'), xwide: true, body: `<form id="jf">
+      <div class="grid3">${U.field(t('date'), U.dateInput('date', ed ? ed.date : today()))}${A.branchField('branch', ed ? ed.branch : undefined)}${U.field(t('entry_type'), U.sel('type', [{ v: 'manual', l: t('jt_manual') }, { v: 'opening', l: t('jt_opening') }], ed ? ed.type : 'manual', ed ? 'disabled' : ''))}</div>
+      <div class="grid2">${U.field(t('description'), U.inp('memo', ed ? A.memoText(ed.memo) : '', 'required'))}${U.field(t('reference'), U.inp('ref', ed ? ed.ref : '', 'dir="ltr"'))}</div>
       <h3 class="h3">${esc(t('entry_lines'))}</h3><div class="jhead"><span>${esc(t('account'))}</span><span>${esc(t('debit'))}</span><span>${esc(t('credit'))}</span><span>${esc(t('line_note'))}</span><span></span></div>
-      <div id="jl">${row(n++)}${row(n++)}</div><button type="button" class="btn ghost sm" data-addrow>${icon('plus')}${esc(t('add_row'))}</button>
+      <div id="jl">${initial}</div><button type="button" class="btn ghost sm" data-addrow>${icon('plus')}${esc(t('add_row'))}</button>
       <div class="totals"><div class="kv"><span class="k">${esc(t('total_debit'))}</span><span class="v money" id="td">0.00</span></div><div class="kv"><span class="k">${esc(t('total_credit'))}</span><span class="v money" id="tc">0.00</span></div><div id="bal"></div></div>
       <button class="btn primary" type="submit">${esc(t('save'))}</button></form>`, onMount: (sh) => {
       const f = $('#jf', sh);
       const lines = () => { const x = U.formData(f); return $$('.jline', f).map(r => { const i = r.dataset.i; return { account: x['a_' + i], debit: parseFloat(x['d_' + i]) || 0, credit: parseFloat(x['c_' + i]) || 0, note: x['n_' + i] }; }); };
       const recalc = () => { const ls = lines(); const dr = ls.reduce((s, l) => s + l.debit, 0), cr = ls.reduce((s, l) => s + l.credit, 0); $('#td', f).textContent = money(dr); $('#tc', f).textContent = money(cr); const diff = S.r2(dr - cr); $('#bal', f).innerHTML = Math.abs(diff) < 0.005 && dr > 0 ? `<div class="notice good">${icon('check')}<span>${esc(t('balanced_ok'))}</span></div>` : dr || cr ? `<div class="notice warn">${icon('alert')}<span>${esc(t('unbalanced_by'))} <b class="money">${money(Math.abs(diff))}</b></span></div>` : ''; };
-      f.addEventListener('input', recalc);
+      f.addEventListener('input', recalc); recalc();
       $('[data-addrow]', f).onclick = () => $('#jl', f).insertAdjacentHTML('beforeend', row(n++));
       f.addEventListener('click', (e) => { const b = e.target.closest('[data-rm]'); if (b && $$('.jline', f).length > 2) { b.closest('.jline').remove(); recalc(); } });
       f.addEventListener('submit', (e) => { e.preventDefault(); const x = U.formData(f); const ls = lines().filter(l => l.account && (l.debit || l.credit)).map(l => ({ ...l, branch: x.branch }));
-        try { S.postEntry(d, { date: x.date, branch: x.branch, type: x.type, memo: x.memo, ref: x.ref, lines: ls, user: A.user().id }); U.closeSheet(); A.commit(t('entry_saved')); } catch (er) { U.fail(er); } });
+        try { if (ed) { S.updateEntry(d, ed.id, { date: x.date, branch: x.branch, memo: x.memo, ref: x.ref, lines: ls, user: A.user().id }); U.closeSheet(); A.commit(t('updated')); } else { S.postEntry(d, { date: x.date, branch: x.branch, type: x.type, memo: x.memo, ref: x.ref, lines: ls, user: A.user().id }); U.closeSheet(); A.commit(t('entry_saved')); } } catch (er) { U.fail(er); } });
     } });
   }
 
@@ -143,9 +157,10 @@
   Screens.receipts = (m, a) => voucherScreen('receipt', m, a);
   Screens.payments = (m, a) => voucherScreen('payment', m, a);
   Screens.transfers = (m, a) => voucherScreen('transfer', m, a);
-  Screens.voucherForm = (kind, pre = {}) => {
+  Screens.voucherForm = (kind, pre = {}, rec = null) => {
     const d = db(); const cashOpts = { under: '1101' };
-    const title = t({ receipt: 'new_receipt', payment: 'new_payment', transfer: 'new_transfer' }[kind]);
+    if (rec) pre = { ...rec };
+    const title = rec ? t('edit_voucher') + ' ' + rec.no : t({ receipt: 'new_receipt', payment: 'new_payment', transfer: 'new_transfer' }[kind]);
     const fromSel = kind === 'receipt' ? U.field(t('received_from'), U.accSelect(d, 'from', pre.from || '', { blank: '— ' + t('pick_account') + ' —', exclude: [] }))
       : kind === 'payment' ? U.field(t('paid_from_acc'), U.accSelect(d, 'from', pre.from || S.branchCash(d, A.defaultBranch()), cashOpts))
         : U.field(t('transfer_from'), U.accSelect(d, 'from', pre.from || S.branchCash(d, A.defaultBranch()), cashOpts));
@@ -153,15 +168,16 @@
       : kind === 'payment' ? U.field(t('paid_to'), U.accSelect(d, 'to', pre.to || '', { blank: '— ' + t('pick_account') + ' —' }))
         : U.field(t('transfer_to'), U.accSelect(d, 'to', pre.to || d.sys.bank, cashOpts));
     U.openSheet({ title, wide: true, body: `<form id="vf">
-      <div class="grid3">${U.field(t('date'), U.dateInput('date', today()))}${A.branchField('branch')}${U.field(t('amount'), U.moneyInput('amount', pre.amount ?? '', 'required'))}</div>
+      <div class="grid3">${U.field(t('date'), U.dateInput('date', pre.date || today()))}${A.branchField('branch', pre.branch || undefined)}${U.field(t('amount'), U.moneyInput('amount', pre.amount ?? '', 'required'))}</div>
       <div class="grid2">${fromSel}${toSel}</div><div id="invpick"></div>
-      ${kind === 'transfer' ? `<div class="grid2">${U.field(t('fee'), U.moneyInput('fee', ''))}${U.field(t('fee_account'), U.accSelect(d, 'feeAccount', d.sys.bankCharges, { types: ['expense'] }))}</div>`
-        : `<div class="grid3">${U.field(t('party_name_lbl'), U.inp('party', pre.party || ''))}${U.field(t('pay_method'), U.sel('method', d.paymentMethods.filter(p => p.active).map(p => ({ v: p.key, l: L(p) })), kind === 'receipt' ? 'transfer' : 'cash'))}${U.field(t('approved_by'), U.inp('approvedBy', A.userName(A.user())))}</div>`}
+      ${kind === 'transfer' ? `<div class="grid2">${U.field(t('fee'), U.moneyInput('fee', pre.fee || ''))}${U.field(t('fee_account'), U.accSelect(d, 'feeAccount', pre.feeAccount || d.sys.bankCharges, { types: ['expense'] }))}</div>`
+        : `<div class="grid3">${U.field(t('party_name_lbl'), U.inp('party', pre.party || ''))}${U.field(t('pay_method'), U.sel('method', d.paymentMethods.filter(p => p.active).map(p => ({ v: p.key, l: L(p) })), pre.method || (kind === 'receipt' ? 'transfer' : 'cash')))}${U.field(t('approved_by'), U.inp('approvedBy', pre.approvedBy || A.userName(A.user())))}</div>`}
       ${U.field(t('notes'), U.inp('notes', pre.notes || ''))}
       <button class="btn primary" type="submit">${esc(t('save'))}</button></form>`, onMount: (sh) => {
       const f = $('#vf', sh);
       const refreshInv = () => {
         const box = $('#invpick', f); if (kind !== 'payment' && kind !== 'receipt') return;
+        if (rec) { const inv = rec.invoiceId && (d.supplierInvoices.find(i => i.id === rec.invoiceId) || d.customerInvoices.find(i => i.id === rec.invoiceId)); box.innerHTML = inv ? `<div class="notice info">${icon('file')}<span>${esc(t('invoices'))}: <b class="num">${esc(inv.no)}</b></span></div>` : ''; return; }
         const acct = $(`[name=${kind === 'payment' ? 'to' : 'from'}]`, f).value;
         const sup = kind === 'payment' && d.suppliers.find(s => s.account === acct); const cus = kind === 'receipt' && d.customers.find(c => c.account === acct);
         const invs = sup ? d.supplierInvoices.filter(i => i.supplierId === sup.id && i.status === 'posted' && i.total - i.paid > 0.005) : cus ? d.customerInvoices.filter(i => i.customerId === cus.id && i.total - i.paid > 0.005) : [];
@@ -171,7 +187,7 @@
       };
       ['from', 'to'].forEach(n => $(`[name=${n}]`, f).addEventListener('change', refreshInv)); refreshInv();
       f.addEventListener('submit', (e) => { e.preventDefault(); const x = U.formData(f); if (!x.from || !x.to) return U.toast(t('pick_account'), 'bad');
-        try { S.createVoucher(d, { kind, date: x.date, branch: x.branch, amount: parseFloat(x.amount) || 0, from: x.from, to: x.to, fee: parseFloat(x.fee) || 0, feeAccount: x.feeAccount, party: x.party, method: x.method, approvedBy: x.approvedBy, notes: x.notes, invoiceId: x.invoiceId || null, user: A.user().id }); U.closeSheet(); A.commit(t('voucher_saved')); } catch (er) { U.fail(er); } });
+        try { if (rec) { S.updateVoucher(d, rec.id, { date: x.date, branch: x.branch, amount: parseFloat(x.amount) || 0, from: x.from, to: x.to, fee: parseFloat(x.fee) || 0, feeAccount: x.feeAccount, party: x.party, method: x.method, approvedBy: x.approvedBy, notes: x.notes }, A.user().id); U.closeSheet(); A.commit(t('updated')); return; } S.createVoucher(d, { kind, date: x.date, branch: x.branch, amount: parseFloat(x.amount) || 0, from: x.from, to: x.to, fee: parseFloat(x.fee) || 0, feeAccount: x.feeAccount, party: x.party, method: x.method, approvedBy: x.approvedBy, notes: x.notes, invoiceId: x.invoiceId || null, user: A.user().id }); U.closeSheet(); A.commit(t('voucher_saved')); } catch (er) { U.fail(er); } });
     } });
   };
 

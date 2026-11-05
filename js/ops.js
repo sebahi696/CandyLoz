@@ -213,12 +213,12 @@
       });
     } });
   }
-  function creditInvoiceForm(customerId) {
+  function creditInvoiceForm(customerId, ed) {
     const d = db(); const c = d.customers.find(x => x.id === customerId);
-    U.openSheet({ title: t('new_credit_invoice') + ' — ' + L({ ar: c.name, en: c.nameEn }), body: `<form id="ci"><div class="grid2">${U.field(t('date'), U.dateInput('date', today()))}${A.branchField('branch')}</div>
-      ${U.field(t('total') + ' (' + t('incl_vat') + ')', U.moneyInput('total', '', 'required'))}${U.field(t('account'), U.accSelect(d, 'account', d.sys.salesCorporate, { types: ['revenue'] }))}${U.field(t('notes'), U.inp('notes'))}
+    U.openSheet({ title: (ed ? t('edit_invoice') + ' ' + ed.no : t('new_credit_invoice')) + ' — ' + L({ ar: c.name, en: c.nameEn }), body: `<form id="ci"><div class="grid2">${U.field(t('date'), U.dateInput('date', ed ? ed.date : today()))}${A.branchField('branch', ed ? ed.branch : undefined)}</div>
+      ${U.field(t('total') + ' (' + t('incl_vat') + ')', U.moneyInput('total', ed ? ed.total : '', 'required'))}${U.field(t('account'), U.accSelect(d, 'account', ed && ed.account || d.sys.salesCorporate, { types: ['revenue'] }))}${U.field(t('notes'), U.inp('notes', ed ? ed.notes : ''))}
       <button class="btn primary" type="submit">${esc(t('save'))}</button></form>`, onMount: (sh) => {
-      $('#ci', sh).addEventListener('submit', (e) => { e.preventDefault(); const x = U.formData(e.target); try { S.createCustomerInvoice(d, { customerId, date: x.date, branch: x.branch, total: parseFloat(x.total) || 0, account: x.account, notes: x.notes, user: A.user().id }); U.closeSheet(); A.commit(t('saved')); } catch (er) { U.fail(er); } });
+      $('#ci', sh).addEventListener('submit', (e) => { e.preventDefault(); const x = U.formData(e.target); try { if (ed) { S.updateCustomerInvoice(d, ed.id, { date: x.date, branch: x.branch, total: parseFloat(x.total) || 0, account: x.account, notes: x.notes }, A.user().id); U.closeSheet(); A.commit(t('updated')); return; } S.createCustomerInvoice(d, { customerId, date: x.date, branch: x.branch, total: parseFloat(x.total) || 0, account: x.account, notes: x.notes, user: A.user().id }); U.closeSheet(); A.commit(t('saved')); } catch (er) { U.fail(er); } });
     } });
   }
 
@@ -241,21 +241,22 @@
     $$('[data-inv]', main).forEach(b => b.addEventListener('click', () => Screens.invoiceSheet(b.dataset.inv)));
   };
   Screens.invoiceForm = (opts = {}) => {
-    const d = db(); const t0 = today(); const defSup = opts.supplierId ? d.suppliers.find(s => s.id === opts.supplierId) : null;
-    const supOpts = [{ v: '', l: '— ' + t('supplier') + ' —' }, ...d.suppliers.map(s => ({ v: s.id, l: L({ ar: s.name, en: s.nameEn }) })), { v: '__new__', l: t('add_new_supplier') }];
-    const ocr = A.feat('ocr');
-    U.openSheet({ title: t('new_invoice'), wide: true, body: `<form id="invform">
+    const d = db(); const t0 = today(); const ed = opts.edit ? d.supplierInvoices.find(i => i.id === opts.edit) : null;
+    const defSup = ed ? d.suppliers.find(s => s.id === ed.supplierId) : opts.supplierId ? d.suppliers.find(s => s.id === opts.supplierId) : null;
+    const supOpts = [{ v: '', l: '— ' + t('supplier') + ' —' }, ...d.suppliers.map(s => ({ v: s.id, l: L({ ar: s.name, en: s.nameEn }) + (s.vat ? ' · ' + s.vat : '') })), ...(ed ? [] : [{ v: '__new__', l: t('add_new_supplier') }])];
+    const ocr = A.feat('ocr') && !ed; const posted = ed && ed.status === 'posted';
+    U.openSheet({ title: ed ? t('edit_invoice') + ' ' + ed.no : t('new_invoice'), wide: true, body: `<form id="invform">
       ${ocr ? `${U.seg('im', [{ v: 'scan', l: t('scan_invoice') }, { v: 'manual', l: t('manual_entry') }], opts.scan ? 'scan' : 'manual')}
       <div id="scanbox" class="${opts.scan ? '' : 'hidden'} mt"><label class="dropzone" for="invphoto">${icon('camera')}<p>${esc(t('take_photo'))}</p><small>JPG · PNG</small></label><input id="invphoto" class="sr" type="file" accept="image/*" capture="environment"><div id="scanstate" class="mt"></div></div>` : ''}
-      <input type="hidden" name="attachment" value="">
-      <div class="mt">${U.field(t('supplier'), U.sel('supplierId', supOpts, defSup?.id || ''))}</div>
+      <input type="hidden" name="attachment" value="${esc(ed && ed.attachment || '')}">
+      <div class="mt">${U.field(t('supplier'), U.sel('supplierId', supOpts, defSup?.id || '', 'data-combo'))}</div>
       <div id="newsup" class="hidden"><div class="grid2">${U.field(t('party_name'), U.inp('ns_name', ''))}${U.field(t('vat_number'), U.inp('ns_vat', '', 'inputmode="numeric" dir="ltr" maxlength="15"'))}</div></div><div id="supnote"></div>
-      <div class="grid2">${U.field(t('invoice_no'), U.inp('no', '', 'dir="ltr" required'))}${U.field(t('invoice_date'), U.dateInput('date', t0))}</div>
-      <div class="grid2">${U.field(t('due_date'), U.dateInput('due', S.addDays(t0, defSup?.terms || 30)))}${A.branchField('branch')}</div>
-      <div class="grid3">${U.field(t('subtotal'), U.moneyInput('subtotal'))}${U.field(t('vat_15'), U.moneyInput('vat'))}${U.field(t('total'), U.moneyInput('total', '', 'required'))}</div>
-      ${U.field(t('debit_account'), U.accSelect(d, 'account', d.sys.purchases, { types: ['cogs', 'expense', 'asset'], exclude: [] }))}
-      ${U.field(t('notes'), '<textarea class="input" name="notes" rows="2"></textarea>')}
-      <div class="btnrow">${A.can('purchases_post') ? `<button class="btn primary" type="submit">${esc(t('post_invoice'))}</button>` : ''}<button class="btn secondary" type="button" data-draft>${esc(t('save_draft'))}</button></div></form>`,
+      <div class="grid2">${U.field(t('invoice_no'), U.inp('no', ed ? ed.no : '', 'dir="ltr" required'))}${U.field(t('invoice_date'), U.dateInput('date', ed ? ed.date : t0))}</div>
+      <div class="grid2">${U.field(t('due_date'), U.dateInput('due', ed ? ed.due : S.addDays(t0, defSup?.terms || 30)))}${A.branchField('branch', ed ? ed.branch : undefined)}</div>
+      <div class="grid3">${U.field(t('subtotal'), U.moneyInput('subtotal', ed ? ed.subtotal : ''))}${U.field(t('vat_15'), U.moneyInput('vat', ed ? ed.vat : ''))}${U.field(t('total'), U.moneyInput('total', ed ? ed.total : '', 'required'))}</div>
+      ${U.field(t('debit_account'), U.accSelect(d, 'account', ed ? ed.account : d.sys.purchases, { types: ['cogs', 'expense', 'asset'], exclude: [] }))}
+      ${U.field(t('notes'), `<textarea class="input" name="notes" rows="2">${esc(ed && ed.notes || '')}</textarea>`)}
+      <div class="btnrow">${posted ? `<button class="btn primary" type="submit">${esc(t('save'))}</button>` : `${A.can('purchases_post') ? `<button class="btn primary" type="submit">${esc(t('post_invoice'))}</button>` : ''}<button class="btn secondary" type="button" data-draft>${esc(t('save_draft'))}</button>`}</div></form>`,
       onMount: (sh) => {
         const f = $('#invform', sh);
         U.bindSeg(f, 'im', (v) => $('#scanbox', f).classList.toggle('hidden', v !== 'scan'));
@@ -270,8 +271,13 @@
           const total = parseFloat(x.total) || 0; if (!total) { U.toast(t('e_amount'), 'bad'); return null; }
           return { supplierId, no: x.no.trim() || 'INV-' + Date.now().toString(36).toUpperCase(), date: x.date, due: x.due, subtotal: parseFloat(x.subtotal) || S.r2(total / 1.15), vat: parseFloat(x.vat) || 0, total, account: x.account, branch: x.branch, notes: x.notes, attachment: x.attachment || null, user: A.user().id };
         };
-        f.addEventListener('submit', (e) => { e.preventDefault(); const x = collect(); if (!x) return; try { const inv = S.createSupplierInvoice(d, x); S.postSupplierInvoice(d, inv.id, A.user().id); U.closeSheet(); A.commit(t('invoice_posted')); } catch (er) { U.fail(er); } });
-        $('[data-draft]', f).addEventListener('click', () => { const x = collect(); if (!x) return; S.createSupplierInvoice(d, x); U.closeSheet(); A.commit(t('draft_saved')); });
+        f.addEventListener('submit', (e) => { e.preventDefault(); const x = collect(); if (!x) return; delete x.user;
+          try {
+            if (posted) { S.updateSupplierInvoice(d, ed.id, x, A.user().id); U.closeSheet(); A.commit(t('updated')); return; }
+            if (ed) { S.updateSupplierInvoice(d, ed.id, x, A.user().id); S.postSupplierInvoice(d, ed.id, A.user().id); U.closeSheet(); A.commit(t('invoice_posted')); return; }
+            const inv = S.createSupplierInvoice(d, { ...x, user: A.user().id }); S.postSupplierInvoice(d, inv.id, A.user().id); U.closeSheet(); A.commit(t('invoice_posted'));
+          } catch (er) { U.fail(er); } });
+        const dr = $('[data-draft]', f); if (dr) dr.addEventListener('click', () => { const x = collect(); if (!x) return; try { if (ed) S.updateSupplierInvoice(d, ed.id, x, A.user().id); else S.createSupplierInvoice(d, x); U.closeSheet(); A.commit(t('draft_saved')); } catch (er) { U.fail(er); } });
       } });
   };
   async function scanInto(f, file) {
@@ -283,7 +289,7 @@
       previewUrl = res.previewUrl; const found = InvoiceReader.parse(res.text, { companyVat: d.company.vat });
       try { const th = await InvoiceReader.prepareImage(file, 600); $('[name=attachment]', f).value = th.dataUrl; } catch (e) { /* ignore */ }
       const matched = found.vat ? d.suppliers.find(s => s.vat === found.vat) : null;
-      const set = (n, v) => { if (v !== undefined && v !== null && v !== '') { const el = $(`[name=${n}]`, f); if (el) { el.value = v; el.classList.add('found'); } } };
+      const set = (n, v) => { if (v !== undefined && v !== null && v !== '') { const el = $(`[name=${n}]`, f); if (el) { if (el.tagName === 'SELECT') U.setSelect(el, v); else el.value = v; el.classList.add('found'); } } };
       const supSel = $('[name=supplierId]', f);
       if (matched) { set('supplierId', matched.id); supSel.dispatchEvent(new Event('change')); $('#supnote', f).innerHTML = `<div class="notice good">${icon('check')}<span>${esc(t('matched_supplier'))}: <b>${esc(L({ ar: matched.name, en: matched.nameEn }))}</b></span></div>`; }
       else if (found.vat) { set('supplierId', '__new__'); supSel.dispatchEvent(new Event('change')); set('ns_vat', found.vat); if (found.name) set('ns_name', found.name); $('#supnote', f).innerHTML = `<div class="notice warn">${icon('alert')}<span>${esc(t('unknown_supplier'))}</span></div>`; }
@@ -307,8 +313,9 @@
       ${inv.status !== 'draft' ? `<div class="kv"><span class="k">${esc(t('remaining'))}</span><span class="v money">${money(open)}</span></div>` : ''}
       ${pays.length ? `<div class="section"><h2>${esc(t('nav_payments'))}</h2>${pays.map(p => `<div class="kv"><span class="k"><span class="code">${esc(p.no)}</span> · ${esc(fmtDate(p.date))} · ${esc(A.accShort(p.from))}</span><span class="v money">${money(p.amount)}</span></div>`).join('')}</div>` : ''}
       <div id="payform"></div>
-      <div class="btnrow">${inv.status === 'draft' && A.can('purchases_post') ? `<button class="btn primary" data-post>${esc(t('post_invoice'))}</button>` : ''}${inv.status !== 'draft' && open > 0 && A.can('vouchers') && A.feat('payments') ? `<button class="btn primary" data-pay>${esc(t('record_payment'))}</button>` : ''}${inv.status === 'draft' ? `<button class="btn danger sq" data-del aria-label="${esc(t('delete'))}">${icon('trash')}</button>` : ''}</div><div id="confirm"></div>`,
+      <div class="btnrow">${(inv.status === 'draft' ? A.can('purchases') : A.can('edit_posted') && A.can('purchases') && !(d.settings.lockDate && inv.date <= d.settings.lockDate)) ? `<button class="btn secondary" data-editinv>${icon('pen')}${esc(t('edit'))}</button>` : ''}${inv.status === 'draft' && A.can('purchases_post') ? `<button class="btn primary" data-post>${esc(t('post_invoice'))}</button>` : ''}${inv.status !== 'draft' && open > 0 && A.can('vouchers') && A.feat('payments') ? `<button class="btn primary" data-pay>${esc(t('record_payment'))}</button>` : ''}${inv.status === 'draft' ? `<button class="btn danger sq" data-del aria-label="${esc(t('delete'))}">${icon('trash')}</button>` : ''}</div><div id="confirm"></div>`,
       onMount: (sh) => {
+        const ei = $('[data-editinv]', sh); if (ei) ei.onclick = () => Screens.invoiceForm({ edit: id });
         const p = $('[data-post]', sh); if (p) p.onclick = () => { try { S.postSupplierInvoice(d, id, A.user().id); U.closeSheet(); A.commit(t('invoice_posted')); } catch (er) { U.fail(er); } };
         const dl = $('[data-del]', sh); if (dl) dl.onclick = () => U.confirmInline($('#confirm', sh), t('are_you_sure'), () => { d.supplierInvoices = d.supplierInvoices.filter(x => x.id !== id); U.closeSheet(); A.commit(t('deleted')); });
         const pay = $('[data-pay]', sh); if (pay) pay.onclick = () => {
@@ -339,34 +346,38 @@
     U.openSheet({ title: x.no + ' — ' + x.desc, wide: true, body: `<div class="kv"><span class="k">${esc(t('date'))}</span><span class="v">${esc(fmtDate(x.date))}</span></div><div class="kv"><span class="k">${esc(t('branch'))}</span><span class="v">${esc(A.branchName(x.branch))}</span></div>
       <div class="kv"><span class="k">${esc(t('pay_account'))}</span><span class="v">${esc(A.accName(x.payAccount))}</span></div>${x.supplierId ? `<div class="kv"><span class="k">${esc(t('supplier'))}</span><span class="v">${esc(A.supName(x.supplierId))}</span></div>` : ''}
       <div class="tablewrap mt"><table class="tbl compact">${U.th([{ l: t('account') }, { l: t('line_desc') }, { l: t('price'), r: 1 }, { l: t('qty'), r: 1 }, { l: t('discount'), r: 1 }, { l: t('net'), r: 1 }, { l: t('vat'), r: 1 }])}<tbody>${x.lines.map(l => `<tr><td>${esc(A.accName(l.account))}</td><td>${esc(l.desc)}</td><td class="money">${money(l.price)}</td><td class="money">${l.qty}</td><td class="money">${money(l.discount)}</td><td class="money">${money(l.net)}</td><td class="money">${money(l.vat)}</td></tr>`).join('')}</tbody></table></div>
-      <div class="kv total"><span class="k">${esc(t('total_with_vat'))}</span><span class="v money">${money(x.total)}</span></div>${je ? `<button class="btn secondary sm mt" data-je>${icon('journal')}${esc(t('entry_no'))} ${esc(je.no)}</button>` : ''}`, onMount: (sh) => { const b = $('[data-je]', sh); if (b) b.onclick = () => Screens.entrySheet(je.id); } });
+      <div class="kv total"><span class="k">${esc(t('total_with_vat'))}</span><span class="v money">${money(x.total)}</span></div>
+      <div class="btnrow">${je ? `<button class="btn secondary sm" data-je>${icon('journal')}${esc(t('entry_no'))} ${esc(je.no)}</button>` : ''}${A.can('edit_posted') && !(d.settings.lockDate && x.date <= d.settings.lockDate) && !(je && je.reversedBy) ? `<button class="btn primary sm" data-editx>${icon('pen')}${esc(t('edit_expense'))}</button>` : ''}</div>`, onMount: (sh) => { const b = $('[data-je]', sh); if (b) b.onclick = () => Screens.entrySheet(je.id); const e2 = $('[data-editx]', sh); if (e2) e2.onclick = () => expenseForm(x); } });
   }
-  function expenseForm() {
-    const d = db(); const lineRow = (i) => `<div class="eline" data-i="${i}"><div class="g-acc">${U.accSelect(d, 'acc_' + i, '', { types: ['expense', 'cogs', 'asset'], blank: '— ' + t('pick_account') + ' —' })}</div>
-      <input class="input" name="desc_${i}" placeholder="${esc(t('line_desc'))}"><input class="input money" type="number" step="0.01" min="0" name="price_${i}" placeholder="${esc(t('price'))}" dir="ltr"><input class="input money" type="number" step="1" min="1" name="qty_${i}" value="1" dir="ltr" aria-label="${esc(t('qty'))}"><input class="input money" type="number" step="0.01" min="0" name="disc_${i}" placeholder="${esc(t('discount'))}" dir="ltr">
-      <label class="check sm"><input type="checkbox" name="tax_${i}" checked><span>${esc(t('taxable'))}</span></label><button type="button" class="iconbtn sm" data-rm="${i}" aria-label="${esc(t('delete'))}">${icon('trash')}</button></div>`;
-    let n = 1;
-    U.openSheet({ title: t('new_expense'), xwide: true, body: `<form id="xf">
-      <div class="grid3">${U.field(t('date'), U.dateInput('date', today()))}${A.branchField('branch')}${U.field(t('supplier') + ' (' + t('optional') + ')', U.sel('supplierId', [{ v: '', l: '—' }, ...d.suppliers.map(s => ({ v: s.id, l: L({ ar: s.name, en: s.nameEn }) }))], ''))}</div>
-      <div class="grid2">${U.field(t('pay_method'), U.sel('payMethod', [{ v: 'cash', l: t('m_cash') }, { v: 'bank', l: t('m_bank') }, { v: 'card', l: t('pmt_card') }, { v: 'credit', l: t('m_credit') }], 'cash'))}<div id="payacc">${U.field(t('pay_account'), U.accSelect(d, 'payAccount', S.branchCash(d, A.defaultBranch()), { under: '1101' }))}</div></div>
-      ${U.field(t('description'), U.inp('desc', '', 'required'))}
-      <h3 class="h3">${esc(t('expense_lines'))}</h3><div id="lines">${lineRow(0)}</div><button type="button" class="btn ghost sm" data-addline>${icon('plus')}${esc(t('add_line'))}</button>
+  function expenseForm(ed) {
+    const d = db(); const lineRow = (i, l = {}) => `<div class="eline" data-i="${i}"><div class="g-acc">${U.accSelect(d, 'acc_' + i, l.account || '', { types: ['expense', 'cogs', 'asset'], blank: '— ' + t('pick_account') + ' —' })}</div>
+      <input class="input" name="desc_${i}" placeholder="${esc(t('line_desc'))}" value="${esc(l.desc || '')}"><input class="input money" type="number" step="0.01" min="0" name="price_${i}" placeholder="${esc(t('price'))}" dir="ltr" value="${l.price || ''}"><input class="input money" type="number" step="1" min="1" name="qty_${i}" value="${l.qty || 1}" dir="ltr" aria-label="${esc(t('qty'))}"><input class="input money" type="number" step="0.01" min="0" name="disc_${i}" placeholder="${esc(t('discount'))}" dir="ltr" value="${l.discount || ''}">
+      <label class="check sm"><input type="checkbox" name="tax_${i}" ${l.taxable === false ? '' : 'checked'}><span>${esc(t('taxable'))}</span></label><button type="button" class="iconbtn sm" data-rm="${i}" aria-label="${esc(t('delete'))}">${icon('trash')}</button></div>`;
+    let n = 0; const pm = ed ? (ed.payMethod === 'credit' ? 'credit' : ed.payMethod || 'cash') : 'cash';
+    const initial = ed ? ed.lines.map(l => lineRow(n++, l)).join('') : lineRow(n++);
+    U.openSheet({ title: ed ? t('edit_expense') + ' ' + ed.no : t('new_expense'), xwide: true, body: `<form id="xf">
+      <div class="grid3">${U.field(t('date'), U.dateInput('date', ed ? ed.date : today()))}${A.branchField('branch', ed ? ed.branch : undefined)}${U.field(t('supplier') + ' (' + t('optional') + ')', U.sel('supplierId', [{ v: '', l: '—' }, ...d.suppliers.map(s => ({ v: s.id, l: L({ ar: s.name, en: s.nameEn }) }))], ed && ed.supplierId || '', 'data-combo'))}</div>
+      <div class="grid2">${U.field(t('pay_method'), U.sel('payMethod', [{ v: 'cash', l: t('m_cash') }, { v: 'bank', l: t('m_bank') }, { v: 'card', l: t('pmt_card') }, { v: 'credit', l: t('m_credit') }], pm))}<div id="payacc" class="${pm === 'credit' ? 'hidden' : ''}">${U.field(t('pay_account'), U.accSelect(d, 'payAccount', ed && pm !== 'credit' ? ed.payAccount : S.branchCash(d, A.defaultBranch()), { under: '1101' }))}</div></div>
+      ${U.field(t('description'), U.inp('desc', ed ? ed.desc : '', 'required'))}
+      <h3 class="h3">${esc(t('expense_lines'))}</h3><div id="lines">${initial}</div><button type="button" class="btn ghost sm" data-addline>${icon('plus')}${esc(t('add_line'))}</button>
       <div class="totals"><div class="kv"><span class="k">${esc(t('subtotal'))}</span><span class="v money" id="xs">0.00</span></div><div class="kv"><span class="k">${esc(t('vat_15'))}</span><span class="v money" id="xv">0.00</span></div><div class="kv total"><span class="k">${esc(t('total_with_vat'))}</span><span class="v money" id="xt">0.00</span></div></div>
       <button class="btn primary" type="submit">${esc(t('save'))}</button></form>`, onMount: (sh) => {
       const f = $('#xf', sh);
       const lines = () => $$('.eline', f).map(r => { const i = r.dataset.i; const x = U.formData(f); return { account: x['acc_' + i], desc: x['desc_' + i], price: parseFloat(x['price_' + i]) || 0, qty: parseFloat(x['qty_' + i]) || 1, discount: parseFloat(x['disc_' + i]) || 0, taxable: !!x['tax_' + i] }; });
       const recalc = () => { let s = 0, v = 0; for (const l of lines()) { const net = l.price * l.qty - l.discount; s += net; if (l.taxable) v += net * 0.15; } $('#xs', f).textContent = money(s); $('#xv', f).textContent = money(v); $('#xt', f).textContent = money(s + v); };
-      f.addEventListener('input', recalc); f.addEventListener('change', recalc);
+      f.addEventListener('input', recalc); f.addEventListener('change', recalc); recalc();
       $('[data-addline]', f).onclick = () => { $('#lines', f).insertAdjacentHTML('beforeend', lineRow(n++)); };
       f.addEventListener('click', (e) => { const b = e.target.closest('[data-rm]'); if (b && $$('.eline', f).length > 1) { b.closest('.eline').remove(); recalc(); } });
-      $('[name=payMethod]', f).addEventListener('change', (e) => { const v = e.target.value; $('#payacc', f).classList.toggle('hidden', v === 'credit'); const sel = $('[name=payAccount]', f); if (v === 'cash') sel.value = S.branchCash(d, $('[name=branch]', f).value); else if (v === 'bank' || v === 'card') sel.value = d.sys.bank; });
+      $('[name=payMethod]', f).addEventListener('change', (e) => { const v = e.target.value; $('#payacc', f).classList.toggle('hidden', v === 'credit'); const sel = $('[name=payAccount]', f); if (v === 'cash') U.setSelect(sel, S.branchCash(d, $('[name=branch]', f).value)); else if (v === 'bank' || v === 'card') U.setSelect(sel, d.sys.bank); });
       f.addEventListener('submit', (e) => {
         e.preventDefault(); const x = U.formData(f); const ls = lines().filter(l => l.account && l.price > 0);
         if (!ls.length) return U.toast(t('e_amount'), 'bad');
         if (x.payMethod === 'credit' && !x.supplierId) return U.toast(t('e_no_supplier'), 'bad');
-        try { S.createExpense(d, { date: x.date, branch: x.branch, supplierId: x.supplierId || null, payMethod: x.payMethod, payAccount: x.payMethod === 'credit' ? null : x.payAccount, desc: x.desc, lines: ls, user: A.user().id }); U.closeSheet(); A.commit(t('expense_saved')); } catch (er) { U.fail(er); }
+        try { if (ed) { S.updateExpense(d, ed.id, { date: x.date, branch: x.branch, supplierId: x.supplierId || null, payMethod: x.payMethod, payAccount: x.payMethod === 'credit' ? null : x.payAccount, desc: x.desc, lines: ls }, A.user().id); U.closeSheet(); A.commit(t('updated')); return; } S.createExpense(d, { date: x.date, branch: x.branch, supplierId: x.supplierId || null, payMethod: x.payMethod, payAccount: x.payMethod === 'credit' ? null : x.payAccount, desc: x.desc, lines: ls, user: A.user().id }); U.closeSheet(); A.commit(t('expense_saved')); } catch (er) { U.fail(er); }
       });
     } });
   }
   Screens.statusPill = statusPill;
+  Screens.creditInvoiceForm = creditInvoiceForm;
+  Screens.expenseForm = (x) => expenseForm(x);
 })();
