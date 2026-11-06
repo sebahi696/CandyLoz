@@ -467,3 +467,57 @@ table.tbl.compact { min-width: 0; font-size: 13px; }
 .edited-tag { font-size: 11px; }
 .history { margin-top: 10px; }
 .history summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+
+/* ---- e-invoicing ---- */
+.iline { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; background: var(--surface-2); align-items: start; }
+.iline .stack-cell { grid-column: 1 / -1; display: grid; gap: 6px; min-width: 0; }
+.iline [data-lt] { align-self: center; }
+.iline.ihead { display: none; }
+@media (min-width: 1024px) {
+  .iline { grid-template-columns: minmax(0, 2.6fr) 80px 110px 72px minmax(0, 1.3fr) 110px 40px; padding: 6px; background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; margin: 0; }
+  .iline .stack-cell { grid-column: auto; }
+  .iline.ihead { display: grid; font-size: 12px; color: var(--muted); font-weight: 600; }
+}
+.zhero { display: flex; gap: 18px; align-items: center; }
+.zscore { --p: 0; flex: none; width: 104px; height: 104px; border-radius: 50%; display: grid; place-content: center; text-align: center; background: radial-gradient(closest-side, var(--surface) 78%, transparent 80% 100%), conic-gradient(var(--good, #1a7f4b) calc(var(--p) * 1%), var(--line) 0); }
+.zscore b { font-size: 24px; } .zscore span { font-size: 11px; color: var(--muted); }
+.zrow { align-items: flex-start; } .ck { flex: none; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; }
+.ck .ic { width: 16px; height: 16px; } .ck.good { background: color-mix(in srgb, #1a7f4b 14%, transparent); color: #1a7f4b; } .ck.bad { background: color-mix(in srgb, #c0392b 14%, transparent); color: #c0392b; } .ck.info { background: var(--accent-soft); color: var(--accent); }
+@media (max-width: 640px) { .zhero { flex-direction: column; align-items: flex-start; } }
+
+/* printable tax invoice (always light, Arabic first) */
+.invdoc { background: #fff; color: #111; border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin: 12px 0; font-size: 13px; line-height: 1.55; }
+.invdoc .en { color: #555; font-size: .86em; font-weight: 400; }
+.invdoc .ih { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; border-bottom: 2px solid #111; padding-bottom: 10px; }
+.invdoc .ititle h2 { margin: 0; font-size: 20px; } .invdoc .iseller { margin-top: 8px; }
+.invdoc .iqr { flex: none; width: 128px; } .invdoc .iqr svg { width: 128px; height: 128px; display: block; }
+.invdoc .imeta { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 6px 16px; margin: 12px 0; }
+.invdoc .imeta > div { display: flex; flex-direction: column; } .invdoc .imeta .k { color: #555; font-size: 12px; } .invdoc .imeta .v { font-weight: 600; } .invdoc .imeta .wide { grid-column: 1 / -1; }
+.invdoc .ibuyer { border: 1px solid #ddd; border-radius: 8px; padding: 8px 10px; margin-bottom: 12px; } .invdoc .ibuyer h4 { margin: 0 0 4px; font-size: 12px; color: #555; }
+.invdoc .itbl { width: 100%; border-collapse: collapse; font-size: 12px; } .invdoc .itbl th, .invdoc .itbl td { border: 1px solid #ddd; padding: 5px 6px; text-align: start; vertical-align: top; }
+.invdoc .itbl th { background: #f3f4f6; font-weight: 600; font-size: .92em; } .invdoc .itbl .n { text-align: end; font-variant-numeric: tabular-nums; } .invdoc .itbl td.n { white-space: nowrap; }
+.invdoc .itotals { margin-inline-start: auto; max-width: 360px; margin-top: 10px; } .invdoc .itotals > div { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; border-bottom: 1px dashed #ddd; }
+.invdoc .itotals .grand { font-weight: 700; font-size: 15px; border-bottom: 2px solid #111; } .invdoc .num { font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: embed; }
+.invdoc .inote { margin-top: 10px; } .invdoc .ifoot { margin-top: 12px; font-size: 10px; color: #777; direction: ltr; text-align: center; }
+@media (max-width: 640px) { .invdoc { padding: 12px; } .invdoc .iqr, .invdoc .iqr svg { width: 96px; height: 96px; } .invdoc .c-x { display: none; } }
+@media print {
+  body.print-inv .sheet .sb > :not(.invdoc) { display: none !important; }
+  body.print-inv .sheet .sh { display: none !important; }
+  body.print-inv .invdoc { border: 0; margin: 0; padding: 0; }
+  body.print-80 .invdoc { width: 72mm; font-size: 10px; } body.print-80 .invdoc .c-x { display: none; }
+  body.print-80 .invdoc .ih { flex-direction: column; align-items: center; text-align: center; } body.print-80 .invdoc .iqr, body.print-80 .invdoc .iqr svg { width: 34mm; height: 34mm; }
+  body.print-80 .invdoc .imeta { grid-template-columns: 1fr; } body.print-80 .invdoc .itotals { max-width: none; }
+
+}
+.btnbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 10px; } .btnbar .btn { width: auto; flex: 0 0 auto; height: 42px; font-size: 14px; }
+.zrow .t, .zrow .m { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; }
+@media (max-width: 640px) { .btnbar .btn { flex: 1 1 calc(50% - 8px); } }
+@media (max-width: 640px) {
+  table.vrt { min-width: 0; font-size: 12px; } .vrt .c-adj { display: none; } .vrt td.lbl { white-space: normal; min-width: 120px; } .vrt td.lbl[colspan] { min-width: 0; }
+  .invdoc .itbl th .en { display: none; } .invdoc .itbl { font-size: 11px; }
+}
+@media print {
+  body.print-inv .sheet, body.print-inv .sheet .sb { width: 100% !important; max-width: none !important; padding: 0 !important; overflow: visible !important; }
+  body.print-inv .invdoc .itbl { font-size: 10px; } body.print-inv .invdoc .itbl th, body.print-inv .invdoc .itbl td { padding: 3px 4px; }
+  body.print-80 .invdoc .itbl th .en { display: none; } body.print-80 .invdoc { width: 70mm; }
+}

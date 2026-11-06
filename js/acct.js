@@ -88,10 +88,11 @@
   };
   Screens.entrySheet = (id) => {
     const d = db(); const j = d.journal.find(x => x.id === id); if (!j) return;
-    const canRev = A.can('journal_reverse') && !j.reversedBy && !['closing', 'reversal'].includes(j.type);
+    const einvDoc = S.LOCKED_TYPES && S.LOCKED_TYPES.includes(j.type) ? (d.salesDocs || []).find(x => x.journalId === j.id) : null;
+    const canRev = A.can('journal_reverse') && !j.reversedBy && !['closing', 'reversal', ...(S.LOCKED_TYPES || [])].includes(j.type);
     const locked = d.settings.lockDate && j.date <= d.settings.lockDate;
     let edit = null;
-    if (A.can('edit_posted') && !j.reversedBy && j.type !== 'closing' && !locked) {
+    if (A.can('edit_posted') && !j.reversedBy && j.type !== 'closing' && !locked && !einvDoc) {
       const src = j.source || {};
       if (['manual', 'opening'].includes(j.type) && A.can('journal')) edit = { label: 'edit_entry', go: () => entryForm(j) };
       else if (j.type === 'purchase' && src.invoiceId && A.can('purchases')) edit = { label: 'edit_invoice', go: () => Screens.invoiceForm({ edit: src.invoiceId }) };
@@ -107,8 +108,9 @@
       <tr class="total"><td colspan="3">${esc(t('totals'))}</td><td class="money">${money(j.total)}</td><td class="money">${money(j.total)}</td></tr></tbody></table></div>
       <p class="small muted">${esc(t('user'))}: ${esc(A.userName(d.users.find(u => u.id === j.user)) || '—')} · ${esc(j.createdAt.slice(0, 16).replace('T', ' '))}${j.reversedBy ? ' · ' + esc(t('is_reversed')) : ''}${j.editedAt ? ` · ${esc(t('edited_by'))}: ${esc(A.userName(d.users.find(u => u.id === j.editedBy)) || '—')} ${esc(j.editedAt.slice(0, 16).replace('T', ' '))}` : ''}</p>
       ${hist.length ? `<details class="history"><summary>${esc(t('history_n', { n: hist.length }))}</summary>${hist.map(h => `<div class="card mt"><div class="small muted">${esc(t('prev_version'))} · ${esc(h.at.slice(0, 16).replace('T', ' '))} · ${esc(A.userName(d.users.find(u => u.id === h.user)) || '—')} · ${esc(h.date)} · ${esc(A.memoText(h.memo))}</div><table class="tbl compact">${h.lines.map(l => `<tr><td>${esc(A.accName(l.account))}</td><td class="money">${money(l.debit, { blankZero: true })}</td><td class="money">${money(l.credit, { blankZero: true })}</td></tr>`).join('')}</table></div>`).join('')}</details>` : ''}</div>
-      <div class="btnrow"><button class="btn secondary" data-print>${icon('print')}${esc(t('print'))}</button>${edit ? `<button class="btn primary" data-edit>${icon('pen')}${esc(t(edit.label))}</button>` : ''}${canRev ? `<button class="btn danger" data-rev>${icon('undo')}${esc(t('reverse'))}</button>` : ''}</div>${locked && A.can('edit_posted') ? `<p class="hint">${icon('lock')} ${esc(t('edit_locked'))}</p>` : ''}<div id="confirm"></div>`, onMount: (sh) => {
+      ${einvDoc ? `<div class="notice info">${icon('lock')}<span>${esc(t('locked_doc'))}</span></div>` : ''}<div class="btnrow"><button class="btn secondary" data-print>${icon('print')}${esc(t('print'))}</button>${einvDoc ? `<button class="btn primary" data-doc>${icon('file')}${esc(einvDoc.no)}</button>` : ''}${edit ? `<button class="btn primary" data-edit>${icon('pen')}${esc(t(edit.label))}</button>` : ''}${canRev ? `<button class="btn danger" data-rev>${icon('undo')}${esc(t('reverse'))}</button>` : ''}</div>${locked && A.can('edit_posted') ? `<p class="hint">${icon('lock')} ${esc(t('edit_locked'))}</p>` : ''}<div id="confirm"></div>`, onMount: (sh) => {
       const eb = $('[data-edit]', sh); if (eb) eb.onclick = () => edit.go();
+      const db2 = $('[data-doc]', sh); if (db2) db2.onclick = () => Screens.docSheet(einvDoc.id);
       $('[data-print]', sh).onclick = () => { document.body.classList.add('print-sheet'); window.print(); setTimeout(() => document.body.classList.remove('print-sheet'), 500); };
       const r = $('[data-rev]', sh); if (r) r.onclick = () => U.confirmInline($('#confirm', sh), t('are_you_sure'), () => { try { S.reverseEntry(d, id, { user: A.user().id, date: j.date < (d.settings.lockDate || '') ? today() : undefined }); U.closeSheet(); A.commit(t('reversed')); } catch (er) { U.fail(er); } }, t('reverse'));
     } });

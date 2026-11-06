@@ -7,6 +7,7 @@
   const REPORTS = [
     { g: 'rep_g_statements', items: [['tb', 'rep_tb'], ['is', 'rep_is'], ['bs', 'rep_bs'], ['cf', 'rep_cf']] },
     { g: 'rep_g_ledgers', items: [['statement', 'rep_statement'], ['supbal', 'rep_supbal'], ['custbal', 'rep_custbal'], ['cash', 'rep_cash'], ['aged', 'rep_aged']] },
+    { g: 'rep_g_tax', items: [['vatret', 'rep_vat_return'], ['zakat', 'rep_zakat']] },
     { g: 'rep_g_ops', items: [['vat', 'rep_vat'], ['sales', 'rep_sales'], ['exp', 'rep_exp'], ['journal', 'rep_journal']] },
   ];
   const FEAT = Object.fromEntries(REPORTS.flatMap(g => g.items));
@@ -187,5 +188,58 @@
       <tr class="total"><td>${esc(t('totals'))}</td>${['current', 'd30', 'd60', 'd90', 'd90p', 'total'].map(k => `<td class="money">${money(a.totals[k])}</td>`).join('')}</tr></tbody></table></div>`;
     A.bindFilter(main, P, () => R.aged(main));
     $('[data-csv]', main).onclick = () => U.download(`aged-payables-${asOf}.csv`, U.csv([[t('supplier'), t('current_b'), t('d30'), t('d60'), t('d90'), t('d90p'), t('total')], ...a.rows.map(x => [A.supName(x.supplierId), x.current, x.d30, x.d60, x.d90, x.d90p, x.total])]));
+  };
+
+  // ---------------------------------------------------------------- VAT return (ZATCA form)
+  const VR = { corrections: 0, carried: 0 };
+  R.vatret = (main) => {
+    const d = db(); if (!P.preset || P.preset === 'this_month' && !VR.touched) { P.preset = 'this_quarter'; VR.touched = true; }
+    const [from, to] = A.periodRange(P); const r = S.vatReturn(d, { from, to, corrections: VR.corrections, carried: VR.carried });
+    const row = (n, cls = '') => { const b = r.boxes[n]; return `<tr class="${cls}"><td class="code">${n}</td><td class="lbl">${esc(t('vr_' + n))}</td><td class="money">${fmt(b.amount)}</td><td class="money c-adj">${fmt(b.adj)}</td><td class="money">${fmt(b.vat)}</td></tr>`; };
+    const one = (n, v, cls = '') => `<tr class="${cls}"><td class="code">${n}</td><td class="lbl" colspan="3">${esc(t('vr_' + n))}</td><td class="money">${fmt(v)}</td></tr>`;
+    const recon = Math.abs(r.diffOut) < 0.05 && Math.abs(r.diffIn) < 0.05;
+    main.innerHTML = A.filterBar(P, { branch: false, presets: ['this_month', 'last_month', 'this_quarter', 'ytd', 'custom'] }) + head(t('rep_vat_return'), periodSub()) + `
+      <div class="notice info">${icon('info')}<span>${esc(t('vr_hint'))} · ${esc(t('vr_due'))}: <b>${esc(fmtDate(r.dueDate))}</b></span></div>
+      <div class="tablewrap mt"><table class="tbl vrt">${U.th([{ l: t('vr_box') }, { l: '' }, { l: t('vr_amount'), r: 1 }, { l: t('vr_adj'), r: 1, cls: 'c-adj' }, { l: t('vr_vat'), r: 1 }])}<tbody>
+        <tr class="group"><td colspan="5">${esc(t('vr_sales'))}</td></tr>${[1, 2, 3, 4, 5].map(n => row(n)).join('')}${row(6, 'total')}
+        <tr class="group"><td colspan="5">${esc(t('vr_purchases'))}</td></tr>${[7, 8, 9, 10, 11].map(n => row(n)).join('')}${row(12, 'total')}
+        ${one(13, r.b13, 'total')}${one(14, r.b14)}${one(15, r.b15)}${one(16, r.b16, 'total')}</tbody></table></div>
+      <div class="grid2 mt no-print narrow">${U.field(t('vr_14'), U.moneyInput('corr', VR.corrections || '', 'min="-5000" max="5000" data-corr'))}${U.field(t('vr_15'), U.moneyInput('carr', VR.carried || '', 'data-carr'))}</div>
+      <div class="section"><h2>${esc(t('vr_recon'))}</h2><div class="notice ${recon ? 'good' : 'warn'}">${icon(recon ? 'check' : 'alert')}<span>${esc(t(recon ? 'vr_recon_ok' : 'vr_recon_bad'))}</span></div>
+      <div class="kv"><span class="k">${esc(t('vr_6'))} — ${esc(t('vr_vat'))} / ${esc(t('ledger') || 'Ledger')}</span><span class="v money">${money(r.boxes[6].vat)} / ${money(r.ledger.output)}</span></div>
+      <div class="kv"><span class="k">${esc(t('vr_12'))} — ${esc(t('vr_vat'))} / ${esc(t('ledger') || 'Ledger')}</span><span class="v money">${money(r.boxes[12].vat)} / ${money(r.ledger.input)}</span></div></div>`;
+    A.bindFilter(main, P, () => R.vatret(main));
+    $('[data-corr]', main).onchange = (e) => { VR.corrections = Math.max(-5000, Math.min(5000, parseFloat(e.target.value) || 0)); R.vatret(main); };
+    $('[data-carr]', main).onchange = (e) => { VR.carried = parseFloat(e.target.value) || 0; R.vatret(main); };
+    $('[data-csv]', main).onclick = () => U.download(`vat-return-${from}-${to}.csv`, U.csv([[t('vr_box'), '', t('vr_amount'), t('vr_adj'), t('vr_vat')], ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(n => [n, t('vr_' + n), r.boxes[n].amount, r.boxes[n].adj, r.boxes[n].vat]), [13, t('vr_13'), '', '', r.b13], [14, t('vr_14'), '', '', r.b14], [15, t('vr_15'), '', '', r.b15], [16, t('vr_16'), '', '', r.b16]]));
+  };
+
+  // ---------------------------------------------------------------- zakat worksheet
+  const ZK = { year: null, gregorian: true, addBack: 0, otherDeductions: 0 };
+  R.zakat = (main) => {
+    const d = db(); const y0 = S.todayISO().slice(0, 4); ZK.year = ZK.year || y0;
+    const r = S.zakatWorksheet(d, ZK);
+    const years = [...new Set([y0, String(+y0 - 1), ...d.journal.map(j => j.date.slice(0, 4))])].sort().reverse();
+    const line = (x) => `<tr${x.code ? ` class="click" data-acc="${x.code}"` : ''}><td class="code">${x.code || ''}</td><td>${esc(t('zk_' + x.key))}</td><td class="money">${fmt(x.v)}</td></tr>`;
+    main.innerHTML = `<div class="filterbar no-print"><select class="select fb" data-y>${years.map(y => `<option ${y === ZK.year ? 'selected' : ''}>${y}</option>`).join('')}</select>${U.seg('cal', [{ v: 'g', l: t('zk_calendar') }, { v: 'h', l: t('zk_hijri') }], ZK.gregorian ? 'g' : 'h')}<span class="grow"></span><button class="btn secondary sm" data-print>${icon('print')}${esc(t('print'))}</button></div>`
+      + head(t('rep_zakat'), `${t('zk_year')} ${r.year} · ${fmtDate(r.start)} → ${fmtDate(r.end)}`) + `
+      <div class="notice info">${icon('info')}<span>${esc(t('zk_hint'))}</span></div>
+      <div class="tablewrap narrow mt"><table class="tbl">${U.th([{ l: t('code') }, { l: t('account') }, { l: t('sar'), r: 1 }])}<tbody>
+        <tr class="group"><td colspan="3">${esc(t('zk_sources'))}</td></tr>${r.sources.map(line).join('')}<tr class="total"><td></td><td>${esc(t('totals'))}</td><td class="money">${fmt(r.totalSources)}</td></tr>
+        <tr class="group"><td colspan="3">${esc(t('zk_deductions'))}</td></tr>${r.deductions.map(line).join('')}<tr class="total"><td></td><td>${esc(t('totals'))}</td><td class="money">${fmt(r.totalDed)}</td></tr>
+        <tr class="total"><td></td><td>${esc(t('zk_base'))} <span class="small muted">(${esc(t('zk_base_rule'))})</span></td><td class="money">${fmt(r.base)}</td></tr>
+        <tr><td></td><td>${esc(t('zk_rate'))}</td><td class="money">${(r.rate * 100).toFixed(4)}%</td></tr>
+        <tr class="total"><td></td><td>${esc(t('zk_due'))}</td><td class="money">${fmt(r.due)}</td></tr>
+        <tr><td></td><td>${esc(t('zk_posted'))}</td><td class="money">${fmt(r.posted)}</td></tr>
+        <tr><td></td><td>${esc(t('zk_deadline'))}</td><td class="money">${esc(fmtDate(r.deadline))}</td></tr></tbody></table></div>
+      <div class="grid2 narrow mt no-print">${U.field(t('zk_add_back'), U.moneyInput('ab', ZK.addBack || '', 'data-ab'))}${U.field(t('zk_other_deductions'), U.moneyInput('od', ZK.otherDeductions || '', 'data-od'))}</div>
+      ${A.can('journal') && r.due > r.posted + 0.005 ? `<div class="btnrow no-print"><button class="btn primary" data-post>${esc(t('zk_post'))} — ${money(S.r2(r.due - r.posted))}</button></div>` : ''}`;
+    $('[data-y]', main).onchange = (e) => { ZK.year = e.target.value; R.zakat(main); };
+    U.bindSeg(main, 'cal', (v) => { ZK.gregorian = v === 'g'; R.zakat(main); });
+    $('[data-ab]', main).onchange = (e) => { ZK.addBack = parseFloat(e.target.value) || 0; R.zakat(main); };
+    $('[data-od]', main).onchange = (e) => { ZK.otherDeductions = parseFloat(e.target.value) || 0; R.zakat(main); };
+    $('[data-print]', main).onclick = () => window.print();
+    $$('[data-acc]', main).forEach(x => x.onclick = () => A.feat('rep_statement') && A.go('reports/statement/' + x.dataset.acc));
+    const pb = $('[data-post]', main); if (pb) pb.onclick = () => { try { S.postZakat(d, { year: r.year, amount: S.r2(r.due - r.posted), user: A.user().id }); A.save(); U.toast(t('saved')); R.zakat(main); } catch (er) { U.fail(er); } };
   };
 })();

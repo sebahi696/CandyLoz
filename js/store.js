@@ -20,6 +20,10 @@
     { key: 'manual_sales', group: 'sales', ar: 'إدخال المبيعات اليدوي', en: 'Manual daily sales' },
     { key: 'eod', group: 'sales', ar: 'إقفال اليوم والصندوق', en: 'End-of-day cash close' },
     { key: 'customers', group: 'sales', ar: 'العملاء والمبيعات الآجلة', en: 'Customers & credit sales' },
+    { key: 'einvoice', group: 'einvoice', ar: 'الفوترة الإلكترونية (فاتورة)', en: 'E-invoicing (Fatoora)' },
+    { key: 'items', group: 'einvoice', ar: 'الأصناف والخدمات', en: 'Items & services' },
+    { key: 'credit_notes', group: 'einvoice', ar: 'الإشعارات الدائنة والمدينة', en: 'Credit & debit notes' },
+    { key: 'zatca', group: 'einvoice', ar: 'مركز الامتثال والربط مع الهيئة', en: 'Compliance center & ZATCA link' },
     { key: 'suppliers', group: 'purchases', ar: 'الموردون', en: 'Suppliers' },
     { key: 'purchases', group: 'purchases', ar: 'فواتير المشتريات', en: 'Purchase invoices' },
     { key: 'ocr', group: 'purchases', ar: 'قراءة الفواتير بالكاميرا', en: 'Invoice photo reading' },
@@ -38,7 +42,9 @@
     { key: 'rep_is', group: 'reports', ar: 'قائمة الدخل', en: 'Income statement' },
     { key: 'rep_bs', group: 'reports', ar: 'قائمة المركز المالي', en: 'Balance sheet' },
     { key: 'rep_cf', group: 'reports', ar: 'قائمة التدفقات النقدية', en: 'Cash flow statement' },
-    { key: 'rep_vat', group: 'reports', ar: 'إقرار ضريبة القيمة المضافة', en: 'VAT return' },
+    { key: 'rep_vat', group: 'reports', ar: 'ملخص ضريبة القيمة المضافة', en: 'VAT summary' },
+    { key: 'rep_vat_return', group: 'reports', ar: 'إقرار ضريبة القيمة المضافة (نموذج الهيئة)', en: 'VAT return (ZATCA form)' },
+    { key: 'rep_zakat', group: 'reports', ar: 'وعاء الزكاة التقديري', en: 'Zakat base worksheet' },
     { key: 'rep_sales', group: 'reports', ar: 'تقرير المبيعات', en: 'Sales report' },
     { key: 'rep_supbal', group: 'reports', ar: 'أرصدة الموردين', en: 'Supplier balances' },
     { key: 'rep_custbal', group: 'reports', ar: 'أرصدة العملاء', en: 'Customer balances' },
@@ -59,6 +65,10 @@
     { key: 'eod_close', f: 'eod', ar: 'إقفال اليوم', en: 'Close the day' },
     { key: 'eod_reopen', f: 'eod', ar: 'إعادة فتح يوم مقفل', en: 'Reopen a closed day' },
     { key: 'customers', f: 'customers', ar: 'إدارة العملاء والفواتير الآجلة', en: 'Manage customers & credit invoices' },
+    { key: 'einv_issue', f: 'einvoice', ar: 'إصدار الفواتير الضريبية', en: 'Issue tax invoices' },
+    { key: 'einv_notes', f: 'credit_notes', ar: 'إصدار الإشعارات الدائنة والمدينة', en: 'Issue credit & debit notes' },
+    { key: 'items', f: 'items', ar: 'إدارة الأصناف', en: 'Manage items' },
+    { key: 'zatca', f: 'zatca', ar: 'مركز الامتثال والربط', en: 'Compliance center & ZATCA link' },
     { key: 'suppliers', f: 'suppliers', ar: 'إدارة الموردين', en: 'Manage suppliers' },
     { key: 'purchases', f: 'purchases', ar: 'إدخال فواتير الموردين', en: 'Enter supplier invoices' },
     { key: 'purchases_post', f: 'purchases', ar: 'ترحيل فواتير الموردين', en: 'Post supplier invoices' },
@@ -77,7 +87,7 @@
     { key: 'users', ar: 'المستخدمون والصلاحيات', en: 'Users & permissions' },
   ];
   const ROLE_DEFAULTS = {
-    operator: ['dashboard', 'import_sales', 'manual_sales', 'eod_close', 'suppliers', 'purchases', 'expenses'],
+    operator: ['dashboard', 'import_sales', 'manual_sales', 'eod_close', 'einv_issue', 'suppliers', 'purchases', 'expenses'],
     accountant: PERMS.map(p => p.key).filter(k => !['settings', 'users'].includes(k)),
     admin: PERMS.map(p => p.key),
   };
@@ -265,6 +275,8 @@
   function methodAccount(db, key, branch) { if (key === 'pos') return db.sys.posClearing || '110106'; const pm = db.paymentMethods.find(p => p.key === key) || db.paymentMethods[0]; return pm.account === '@branch_cash' ? branchCash(db, branch) : pm.account; }
 
   // ---------------------------------------------------------------- journal
+  // entries behind issued tax invoices / notes are immutable (ZATCA): corrections go through credit/debit notes
+  const EINV_LOCKED = ['tax_invoice', 'tax_credit', 'tax_debit'];
   function prepLines(db, e) {
     const lines = e.lines.map(l => ({ account: l.account, debit: r2(l.debit), credit: r2(l.credit), branch: l.branch || e.branch || null, note: l.note || '' })).filter(l => l.debit || l.credit);
     if (lines.length < 2) throw err('min_lines');
@@ -276,7 +288,7 @@
   // edit a posted entry in place (same number), keeping an audit trail of every previous version
   function updateEntry(db, id, e) {
     const j = db.journal.find(x => x.id === id); if (!j) throw err('no_entry');
-    if (j.reversedBy) throw err('already_reversed'); if (j.type === 'closing') throw err('closing_entry');
+    if (j.reversedBy) throw err('already_reversed'); if (j.type === 'closing') throw err('closing_entry'); if (EINV_LOCKED.includes(j.type)) throw err('einvoice_locked');
     const date = e.date || j.date; const lock = db.settings.lockDate;
     if (lock && (j.date <= lock || date <= lock)) throw err('period_locked', lock);
     const { lines, dr } = prepLines(db, { ...e, branch: e.branch ?? j.branch, lines: e.lines || j.lines });
@@ -292,7 +304,7 @@
     db.journal.push(entry); return entry;
   }
   function reverseEntry(db, id, { date, user } = {}) {
-    const j = db.journal.find(x => x.id === id); if (!j) throw err('no_entry'); if (j.reversedBy) throw err('already_reversed');
+    const j = db.journal.find(x => x.id === id); if (!j) throw err('no_entry'); if (j.reversedBy) throw err('already_reversed'); if (EINV_LOCKED.includes(j.type)) throw err('einvoice_locked');
     const rev = postEntry(db, { date: date || j.date, branch: j.branch, type: 'reversal', memo: bi('عكس القيد ' + j.no, 'Reversal of ' + j.no), ref: j.no, user, source: { reversalOf: j.id }, lines: j.lines.map(l => ({ ...l, debit: l.credit, credit: l.debit })) });
     j.reversedBy = rev.id; return rev;
   }
@@ -710,7 +722,9 @@
   }
   function seedCandyLoz() {
     const t0 = todayISO();
-    const db = emptyDb({ name: 'كاندي لوز', nameEn: 'Candy Loz', vat: '314944989200003', cr: '4030512345', city: 'جدة', address: 'جدة — حي البلد' });
+    const db = emptyDb({ name: 'كاندي لوز', nameEn: 'Candy Loz', vat: '314944989200003', cr: '4030512345', city: 'جدة', address: 'جدة — حي البلد',
+      legalName: 'مؤسسة كاندي لوز التجارية', legalNameEn: 'Candy Loz Trading Est.', idType: 'CRN', idNo: '4030512345',
+      addr: { street: 'شارع قابل', building: '2468', district: 'حي البلد', city: 'جدة', postal: '22233', additional: '7311', region: 'منطقة مكة المكرمة', country: 'SA' } });
     addBranch(db, { id: 'b1', ar: 'فرع البلد', en: 'Al-Balad', code: 'BLD', city: 'جدة' });
     addBranch(db, { id: 'b2', ar: 'فرع الحمراء', en: 'Al-Hamra', code: 'HMR', city: 'جدة' });
     addBranch(db, { id: 'b3', ar: 'فرع الروضة', en: 'Al-Rawdah', code: 'RWD', city: 'جدة' });
@@ -735,8 +749,8 @@
       ['مؤسسة سناك اليابان', 'Japan Snack Est.', '300887766500003', 30, ['812', 'شارع التحلية', 'حي الزهراء', 'جدة', '23521', '7788', 'RZHA0812'], '0551122334'],
     ];
     const sups = S.map(([name, nameEn, vat, terms, a, phone]) => saveSupplier(db, { name, nameEn, vat, terms, phone, cr: '4030' + vat.slice(4, 10), addr: { building: a[0], street: a[1], district: a[2], city: a[3], postal: a[4], additional: a[5], short: a[6] } }));
-    const C = [['شركة ليالي جدة لتنظيم الحفلات', 'Jeddah Nights Events Co.', '310998877100003', 30], ['مؤسسة الضيافة الراقية', 'Fine Hospitality Est.', '300445566700003', 15], ['شركة نسمة للفعاليات والمؤتمرات', 'Nesma Events & Conferences', '311223344500003', 30]];
-    const custs = C.map(([name, nameEn, vat, terms]) => saveCustomer(db, { name, nameEn, vat, terms, phone: '05' + vat.slice(5, 13), addr: { city: 'جدة' } }));
+    const C = [['شركة ليالي جدة لتنظيم الحفلات', 'Jeddah Nights Events Co.', '310998877100003', 30, ['3412', 'طريق الملك عبدالعزيز', 'حي الشاطئ', 'جدة', '23613', '7721']], ['مؤسسة الضيافة الراقية', 'Fine Hospitality Est.', '300445566700003', 15, ['8120', 'شارع التحلية', 'حي الأندلس', 'جدة', '23326', '4410']], ['شركة نسمة للفعاليات والمؤتمرات', 'Nesma Events & Conferences', '311223344500003', 30, ['2275', 'شارع صاري', 'حي السلامة', 'جدة', '23525', '6618']]];
+    const custs = C.map(([name, nameEn, vat, terms, a]) => saveCustomer(db, { name, nameEn, vat, terms, cr: '4030' + vat.slice(3, 9), idType: 'CRN', phone: '05' + vat.slice(5, 13), addr: { building: a[0], street: a[1], district: a[2], city: a[3], postal: a[4], additional: a[5] } }));
 
     // ---- fixed assets register (bought before the books started) → opening accumulated depreciation
     const openDate = addDays(t0, -50); const openYM = addMonths(openDate.slice(0, 7), -1);
@@ -827,13 +841,22 @@
     db.journal.sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
     // renumber chronologically for a clean demo
     const seq = {}; for (const j of db.journal) { const y = j.date.slice(0, 4); seq[y] = (seq[y] || 0) + 1; j.no = y + String(seq[y]).padStart(6, '0'); } db.seq.je = seq;
+    if (root.Store.einvEnsure) seedEinvoices(db, custs, t0);
     return db;
+  }
+  // a few issued e-invoices so the compliance features are visible in the demo
+  function seedEinvoices(db, custs, t0) {
+    const X = root.Store; X.einvEnsure(db); X.seedItems(db); const it = (code) => db.items.find(i => i.code === code);
+    const a = X.issueDoc(db, { kind: 'invoice', profile: 'standard', date: addDays(t0, -6), time: '11:20:05', branch: 'b1', customerId: custs[0].id, payMethod: 'credit', user: 'u2', lines: [{ itemId: it('EV-CORP').id, qty: 12, price: 250, discPct: 5 }, { itemId: it('GB-LX').id, qty: 10, price: 120 }, { itemId: it('SV-WRAP').id, qty: 22, price: 15 }] });
+    X.issueDoc(db, { kind: 'invoice', profile: 'simplified', date: addDays(t0, -3), time: '18:42:10', branch: 'b2', payMethod: 'mada', user: 'u4', lines: [{ itemId: it('CH-500').id, qty: 2 }, { itemId: it('JL-1K').id, qty: 1 }, { itemId: it('DR-KR').id, qty: 4 }] });
+    X.issueDoc(db, { kind: 'credit', date: addDays(t0, -2), time: '10:05:44', branch: 'b1', origId: a.id, reasonCode: 'return', payMethod: 'credit', user: 'u2', lines: [{ itemId: it('GB-LX').id, qty: 2, price: 120 }] });
+    X.issueDoc(db, { kind: 'invoice', profile: 'standard', date: addDays(t0, -1), time: '13:15:30', branch: 'b1', customerId: custs[2].id, payMethod: 'transfer', user: 'u2', lines: [{ itemId: it('CH-500').id, qty: 30 }, { itemId: it('NT-500').id, qty: 20 }] });
   }
   function seedBlank({ name, nameEn, vat, cr, city, adminName, adminNameEn, adminPin, branchName }) {
     const db = emptyDb({ name, nameEn: nameEn || name, vat: vat || '', cr: cr || '', city: city || '' });
     addBranch(db, { id: 'b1', ar: branchName || 'الفرع الرئيسي', en: 'Main branch', code: 'MAIN', city: city || '' });
     db.users = [{ id: 'u1', name: adminName || 'مدير النظام', nameEn: adminNameEn || adminName || 'Admin', role: 'admin', pin: adminPin || '1234', active: true }];
-    db.settings.defaultBranch = 'b1'; return db;
+    db.settings.defaultBranch = 'b1'; if (root.Store.einvEnsure) root.Store.einvEnsure(db); return db;
   }
 
   // ---------------------------------------------------------------- persistence (platform + tenants)
@@ -862,6 +885,8 @@
     if (!db.accounts.find(a => a.code === '110106')) { db.accounts.push({ code: '110106', parent: '1101', ar: 'مقبوضات نقاط البيع تحت التسوية', en: 'POS receipts pending settlement', type: 'asset', group: false, contra: false, sub: false, active: true, system: true }); db.accounts.sort((x, y) => x.code.localeCompare(y.code)); }
     if (!db.migrations || !db.migrations.editPosted) { db.migrations = { ...(db.migrations || {}), editPosted: true }; if (db.roles && db.roles.accountant && !db.roles.accountant.includes('edit_posted')) db.roles.accountant.push('edit_posted'); }
     db.sys.posClearing = db.sys.posClearing || '110106'; db.sys.salesDiscounts = db.sys.salesDiscounts || '4105';
+    if (!db.migrations.einv) { db.migrations.einv = true; if (db.roles) { for (const k of ['einv_issue', 'einv_notes', 'items', 'zatca']) if (db.roles.accountant && !db.roles.accountant.includes(k)) db.roles.accountant.push(k); if (db.roles.operator && !db.roles.operator.includes('einv_issue')) db.roles.operator.push('einv_issue'); } }
+    if (root.Store.einvEnsure) { root.Store.einvEnsure(db); if (!db.items.length && db.company.vat === '314944989200003') root.Store.seedItems(db); }
     return db;
   }
   function save(tenantId) { tenantId = tenantId || current; if (hasLS && cache[tenantId]) { try { localStorage.setItem(TKEY(tenantId), JSON.stringify(cache[tenantId])); } catch (e) { console.error('save failed', e); } } }

@@ -1,0 +1,136 @@
+{
+ "env": "sandbox",
+ "startedAt": "2026-11-06T06:04:24.255Z",
+ "steps": [
+  {
+   "step": "issued in Daftar",
+   "docs": [
+    {
+     "no": "INV-MAIN-2026-00001",
+     "kind": "invoice",
+     "profile": "standard",
+     "icv": 1,
+     "total": 273.7
+    },
+    {
+     "no": "CRN-MAIN-2026-00001",
+     "kind": "credit",
+     "profile": "standard",
+     "icv": 2,
+     "total": 149.5
+    },
+    {
+     "no": "DBN-MAIN-2026-00001",
+     "kind": "debit",
+     "profile": "standard",
+     "icv": 3,
+     "total": 28.75
+    },
+    {
+     "no": "INV-MAIN-2026-00002",
+     "kind": "invoice",
+     "profile": "simplified",
+     "icv": 4,
+     "total": 323.7
+    },
+    {
+     "no": "CRN-MAIN-2026-00002",
+     "kind": "credit",
+     "profile": "simplified",
+     "icv": 5,
+     "total": 149.5
+    },
+    {
+     "no": "DBN-MAIN-2026-00002",
+     "kind": "debit",
+     "profile": "simplified",
+     "icv": 6,
+     "total": 11.5
+    }
+   ],
+   "chain": {
+    "deviceId": "egs-b1",
+    "branch": "b1",
+    "count": 6,
+    "ok": true,
+    "problems": []
+   }
+  },
+  {
+   "step": "compliance CSID",
+   "http": 200,
+   "requestID": 1234567890123,
+   "disposition": "ISSUED",
+   "errors": null
+  },
+  {
+   "step": "certificate",
+   "subject": "CN=Daftar-EGS-b1\nOU=Jeddah Branch\nO=Daftar Test Est.\nC=SA",
+   "issuer": "CN=eInvoicing",
+   "validTo": "Nov  5 21:00:00 2031 GMT"
+  },
+  {
+   "step": "compliance check standard invoice INV-MAIN-2026-00001",
+   "http": 200,
+   "status": "CLEARED",
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "step": "compliance check standard credit CRN-MAIN-2026-00001",
+   "http": 200,
+   "status": "CLEARED",
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "step": "compliance check standard debit DBN-MAIN-2026-00001",
+   "http": 200,
+   "status": "CLEARED",
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "step": "compliance check simplified invoice INV-MAIN-2026-00002",
+   "http": 200,
+   "status": "REPORTED",
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "step": "compliance check simplified credit CRN-MAIN-2026-00002",
+   "http": 200,
+   "status": "REPORTED",
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "step": "compliance check simplified debit DBN-MAIN-2026-00002",
+   "http": 200,
+   "status": "REPORTED",
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "step": "production CSID",
+   "http": 200,
+   "disposition": "ISSUED"
+  },
+  {
+   "step": "reporting (simplified)",
+   "http": 200,
+   "status": "REPORTED",
+   "errors": [],
+   "warnings": []
+  },
+  {
+   "step": "clearance (standard)",
+   "http": 200,
+   "status": "CLEARED",
+   "errors": [],
+   "warnings": [],
+   "clearedInvoiceReturned": true
+  }
+ ],
+ "finishedAt": "2026-11-06T06:04:28.142Z"
+}

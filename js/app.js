@@ -33,6 +33,10 @@ window.App = (() => {
       { id: 'sales', icon: 'sales', label: 'nav_sales', perm: ['import_sales', 'manual_sales'] },
       { id: 'eod', icon: 'eod', label: 'nav_eod', perm: 'eod_close' },
       { id: 'customers', icon: 'customers', label: 'nav_customers', perm: 'customers' }] },
+    { group: 'g_einvoice', items: [
+      { id: 'invoices', icon: 'invoice', label: 'nav_invoices', perm: 'einv_issue', f: 'einvoice' },
+      { id: 'items', icon: 'items', label: 'nav_items', perm: 'items', f: 'items' },
+      { id: 'zatca', icon: 'shield', label: 'nav_zatca', perm: 'zatca', f: 'zatca' }] },
     { group: 'g_purchases', items: [
       { id: 'suppliers', icon: 'suppliers', label: 'nav_suppliers', perm: 'suppliers' },
       { id: 'purchases', icon: 'purchases', label: 'nav_purchases', perm: 'purchases' },
@@ -65,6 +69,7 @@ window.App = (() => {
     if (!db) return 0;
     if (id === 'eod') return openDays().length;
     if (id === 'purchases') return db.supplierInvoices.filter(i => i.status === 'draft').length;
+    if (id === 'zatca') return db.salesDocs ? S.pendingQueue(db).length : 0;
     return 0;
   }
 
@@ -185,10 +190,13 @@ window.App = (() => {
     }
     const att = [];
     if (open.length) att.push(`<a class="tile warn" href="#/eod"><span class="k">${esc(t('days_not_closed'))}</span><span class="v">${open.length}</span></a>`);
+    const zq = feat('einvoice') && db.salesDocs ? S.pendingQueue(db).length : 0;
+    if (zq && can('zatca')) att.push(`<a class="tile warn" href="#/zatca"><span class="k">${esc(t('zatca_pending_tile'))}</span><span class="v">${zq}</span></a>`);
     if (drafts.length && can('purchases')) att.push(`<a class="tile warn" href="#/purchases"><span class="k">${esc(t('unposted_invoices'))}</span><span class="v">${drafts.length}</span></a>`);
     if (dueWeek > 0 && can('purchases')) att.push(`<a class="tile" href="#/purchases"><span class="k">${esc(t('due_this_week'))}</span><span class="v money">${money(dueWeek, { whole: true })}</span></a>`);
     if (notImported.length && can('import_sales')) att.push(`<a class="tile bad" href="#/sales"><span class="k">${esc(t('no_sales_today'))}</span><span class="v small-v">${esc(notImported.map(b => L(b)).join(' · '))}</span></a>`);
     const quick = [
+      can('einv_issue') && feat('einvoice') && `<button data-go="invoices/new">${icon('invoice')}${esc(t('q_invoice'))}</button>`,
       can('import_sales') && `<button data-go="sales">${icon('upload')}${esc(t('q_import'))}</button>`,
       can('purchases') && feat('ocr') && `<button data-act="scan">${icon('camera')}${esc(t('q_scan'))}</button>`,
       can('eod_close') && `<button data-go="eod">${icon('eod')}${esc(t('q_eod'))}</button>`,

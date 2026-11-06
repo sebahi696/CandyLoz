@@ -182,12 +182,13 @@
       <div class="kv"><span class="k">${esc(t('payment_terms'))}</span><span class="v num">${p.terms || 0}</span></div>
       <div class="btnrow wrap">
         ${kind === 'supplier' && A.can('purchases') ? `<button class="btn primary" data-newinv>${icon('plus')}${esc(t('new_invoice'))}</button>` : ''}
-        ${kind === 'customer' ? `<button class="btn primary" data-newci>${icon('plus')}${esc(t('new_credit_invoice'))}</button>${A.can('vouchers') && A.feat('receipts') ? `<button class="btn secondary" data-collect>${esc(t('collect'))}</button>` : ''}` : ''}
+        ${kind === 'customer' && A.feat('einvoice') && A.can('einv_issue') ? `<button class="btn primary" data-newtax>${icon('plus')}${esc(t('new_tax_invoice'))}</button>` : ''}${kind === 'customer' ? `<button class="btn ${A.feat('einvoice') ? 'secondary' : 'primary'}" data-newci>${icon('plus')}${esc(t('new_credit_invoice'))}</button>${A.can('vouchers') && A.feat('receipts') ? `<button class="btn secondary" data-collect>${esc(t('collect'))}</button>` : ''}` : ''}
         ${A.can('reports') && A.feat('rep_statement') ? `<button class="btn secondary" data-stmt>${esc(t('statement_of_account'))}</button>` : ''}
         <button class="btn secondary sq" data-edit aria-label="${esc(t('edit'))}">${icon('pen')}</button></div>
       <div class="section"><h2>${esc(t(kind === 'supplier' ? 'invoices' : 'credit_invoices'))}</h2><div class="list">${docs.length ? docs.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10).map(i => `<button class="row" data-inv="${i.id}"><span class="main"><span class="t num">${esc(i.no)}</span><span class="m">${esc(fmtDate(i.date))}</span></span><span class="end"><span class="money">${money(i.total)}</span>${kind === 'supplier' ? statusPill(S.invoiceStatus(i)) : U.pill(money(i.total - i.paid), i.total - i.paid > 0.005 ? 'warn' : 'good')}</span></button>`).join('') : U.empty('—')}</div></div>`, onMount: (sh) => {
       const ni = $('[data-newinv]', sh); if (ni) ni.onclick = () => Screens.invoiceForm({ supplierId: id });
       const nc = $('[data-newci]', sh); if (nc) nc.onclick = () => creditInvoiceForm(id);
+      const nt = $('[data-newtax]', sh); if (nt) nt.onclick = () => Screens.docForm({ profile: 'standard', customerId: id });
       const co = $('[data-collect]', sh); if (co) co.onclick = () => { U.closeSheet(true); Screens.voucherForm('receipt', { from: p.account, party: p.name, amount: bal > 0 ? bal : '' }); };
       const st = $('[data-stmt]', sh); if (st) st.onclick = () => { U.closeSheet(true); A.go('reports/statement/' + p.account); };
       $('[data-edit]', sh).onclick = () => partyForm(kind, p);
@@ -200,6 +201,7 @@
       <div class="grid2">${U.field(t('name_ar'), U.inp('name', p.name || '', 'required'))}${U.field(t('name_en'), U.inp('nameEn', p.nameEn || '', 'dir="ltr"'))}</div>
       <div class="grid2">${U.field(t('vat_number'), U.inp('vat', p.vat || '', 'inputmode="numeric" dir="ltr" maxlength="15"' + (kind === 'supplier' ? ' required' : '')), t('vat_hint'))}${U.field(t('cr_number'), U.inp('cr', p.cr || '', 'inputmode="numeric" dir="ltr"'))}</div><div class="err hidden" id="vaterr">${esc(t('invalid_vat'))}</div>
       <div class="grid3">${U.field(t('phone'), U.inp('phone', p.phone || '', 'type="tel" dir="ltr"'))}${U.field(t('email'), U.inp('email', p.email || '', 'type="email" dir="ltr"'))}${U.field(t('payment_terms'), U.inp('terms', p.terms ?? 30, 'type="number" inputmode="numeric" dir="ltr"'))}</div>
+      ${kind === 'customer' ? `<div class="grid2">${U.field(t('id_type'), U.sel('idType', [{ v: '', l: '—' }, ...Zatca.BUYER_ID_TYPES.map(x => ({ v: x.v, l: L(x) }))], p.idType || (p.cr ? 'CRN' : '')))}${U.field(t('id_no'), U.inp('idNo', p.idNo || '', 'dir="ltr"'))}</div><p class="hint">${esc(t('einv_buyer_hint'))}</p>` : ''}
       <h3 class="h3">${esc(t('national_address'))}</h3>
       <div class="grid3">${U.field(t('building_no'), U.inp('building', a.building || '', 'inputmode="numeric" dir="ltr"'))}${U.field(t('street'), U.inp('street', a.street || ''))}${U.field(t('district'), U.inp('district', a.district || ''))}</div>
       <div class="grid3">${U.field(t('city'), U.inp('city', a.city || ''))}${U.field(t('postal_code'), U.inp('postal', a.postal || '', 'inputmode="numeric" dir="ltr"'))}${U.field(t('additional_no'), U.inp('additional', a.additional || '', 'inputmode="numeric" dir="ltr"'))}</div>
@@ -208,7 +210,7 @@
       $('#pf', sh).addEventListener('submit', (e) => {
         e.preventDefault(); const x = U.formData(e.target);
         if ((kind === 'supplier' || x.vat) && !S.validVAT(x.vat)) { $('#vaterr', sh).classList.remove('hidden'); return; }
-        const rec = { id: p.id, name: x.name.trim(), nameEn: x.nameEn.trim() || x.name.trim(), vat: x.vat.replace(/\D/g, ''), cr: x.cr, phone: x.phone, email: x.email, terms: +x.terms || 0, addr: { building: x.building, street: x.street, district: x.district, city: x.city, postal: x.postal, additional: x.additional, short: (x.short || '').toUpperCase() } };
+        const rec = { id: p.id, name: x.name.trim(), nameEn: x.nameEn.trim() || x.name.trim(), vat: x.vat.replace(/\D/g, ''), cr: x.cr, phone: x.phone, email: x.email, terms: +x.terms || 0, ...(kind === 'customer' ? { idType: x.idType || '', idNo: (x.idNo || '').trim() } : {}), addr: { building: x.building, street: x.street, district: x.district, city: x.city, postal: x.postal, additional: x.additional, short: (x.short || '').toUpperCase() } };
         try { const saved = kind === 'supplier' ? S.saveSupplier(db(), rec) : S.saveCustomer(db(), rec); A.save(); U.closeSheet(); U.toast(t('saved')); if (onSaved) onSaved(saved); else A.render(); } catch (er) { U.fail(er); }
       });
     } });
@@ -379,5 +381,6 @@
   }
   Screens.statusPill = statusPill;
   Screens.creditInvoiceForm = creditInvoiceForm;
+  Screens.partyForm = partyForm;
   Screens.expenseForm = (x) => expenseForm(x);
 })();

@@ -1,4 +1,4 @@
-# دفتر — Daftar v0.2
+# دفتر — Daftar v0.3
 
 **نظام محاسبي متكامل فوق نقاط البيع — مخصص لكاندي لوز، من شركة هنترز.**
 **Full accounting system on top of the SkySystem POS — customised for Candy Loz, by Hunters.**
@@ -19,7 +19,16 @@ Data lives in the browser (localStorage) — each device has its own demo copy. 
 **Sales:** SkySystem export import (CSV/XLSX, auto column matching, dedupe) · manual daily entry · end-of-day cash close per branch · customers & credit invoices.
 **Purchases & expenses:** suppliers (VAT no., national address, own ledger sub-account) · purchase invoices (manual or photo OCR) · multi-line expenses with VAT.
 **Accounting:** 5-level chart of accounts tailored to a confectionery retailer (branch cash boxes, mada/Visa/Tabby/Tamara/Salla receivables, inventory by category, spoilage, gateway fees…) · journal entries with 14 operation types, manual & opening entries, reversal · receipt / payment / transfer vouchers (with fee & invoice allocation) · fixed assets register with monthly straight-line depreciation · payment methods mapped to GL accounts · accounting settings (fiscal year, period lock, zakat, inventory system, printing, system-account mapping) · year-end close.
-**Reports:** trial balance (levels 1–5, tree/level/leaf) · income statement · balance sheet (balances, includes current-period profit) · cash flow (indirect, reconciled) · account statement (detail or monthly) · supplier / customer / cash balances · aged payables · VAT return · sales · expenses · general journal. CSV export + print.
+**E-invoicing (ZATCA / Fatoora):**
+- Standard (B2B) and simplified (B2C) tax invoices, plus credit and debit notes that reference the original invoice and give a reason.
+- Items catalog with VAT categories S/Z/E/O and VATEX reasons.
+- Each branch is an EGS unit with its own invoice counter (ICV) and SHA-256 hash chain (PIH).
+- UBL 2.1 XML, a TLV QR code, and A4 / 80mm printing in Arabic and English.
+- Issued invoices are locked: their journal entries can't be edited or reversed.
+- Compliance center with a checklist, devices, ZATCA queue, audit log and chain verification.
+- Phase 2 signing and clearance/reporting go through the link service in `server/`. It has been tested end to end against ZATCA's developer sandbox: all checks passed with 0 errors and 0 warnings.
+
+**Reports:** trial balance (levels 1–5, tree/level/leaf) · income statement · balance sheet (balances, includes current-period profit) · cash flow (indirect, reconciled) · account statement (detail or monthly) · supplier / customer / cash balances · aged payables · VAT return on the ZATCA form (boxes 1–16, reconciled to the ledger) · zakat base worksheet (2.5% / 2.5776%, books the provision) · VAT summary · sales · expenses · general journal. CSV export + print.
 **Admin:** users (with plan limits), branches (auto-creates cash box + sales account), roles & permissions matrix, company profile, backup/restore.
 **Hunters platform (super admin):** list of client companies, add a new company, switch any of 33 features on/off per client, plan & user/branch limits, suspend, open any company as admin for support.
 
@@ -31,7 +40,12 @@ js/ui.js       UI primitives (sheets, forms, account picker, tables)
 js/app.js      shell, session, permissions, feature flags, navigation, dashboard, platform
 js/ops.js      sales import, end of day, customers, suppliers, purchases (OCR), expenses
 js/acct.js     chart of accounts, journal, vouchers, fixed assets, payment methods, settings, users, roles
-js/reports.js  financial statements & reports
+js/reports.js  financial statements & reports (incl. VAT return, zakat)
+js/zatca.js    ZATCA core: SHA-256, TLV QR, UBL 2.1 XML, validation (shared with the server)
+js/einvoice.js e-invoice engine: issue/credit/debit, ICV/PIH chain, locks, VAT return, zakat, compliance
+js/einv-ui.js  tax invoices, items, compliance center, company (seller) profile
+server/        Fatoora link service: CSR/CSID onboarding, XAdES signing, reporting & clearance (see server/README.md)
+tests/         node tests/einvoice.test.js
 ```
 
 Hunters Company · 2026
